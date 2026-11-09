@@ -1,0 +1,21 @@
+# Godot
+.import/
+.export/
+.godot/
+.cache/
+.tmp/
+*.translation
+
+# Build outputs and signing keys
+build/
+dist/
+*.apk
+*.aab
+*.keystore
+*.jks
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

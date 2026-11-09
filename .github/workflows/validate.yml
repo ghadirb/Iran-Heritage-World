@@ -1,0 +1,29 @@
+name: Validate Godot Project
+
+on:
+  push:
+    branches: [main, "codex/**"]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Install Godot
+        uses: chickensoft-games/setup-godot@v2
+        with:
+          version: 4.4.1
+          use-dotnet: false
+      - name: Check project files
+        run: |
+          test -f app/project.godot
+          test -f app/scenes/main.tscn
+          test -f app/scripts/player_controller.gd
+          test -f app/scripts/game_hud.gd
+      - name: Import project
+        run: godot --headless --editor --path app --quit
+      - name: Parse and load main scene
+        run: godot --headless --path app --quit
