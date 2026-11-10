@@ -1,12 +1,8 @@
-[gd_scene load_steps=6 format=3]
+[gd_scene load_steps=5 format=3]
 
 [ext_resource type="Script" path="res://scripts/player_controller.gd" id="1_player"]
 [ext_resource type="Script" path="res://scripts/game_hud.gd" id="2_hud"]
 [ext_resource type="Script" path="res://scripts/world_controller.gd" id="3_world"]
-
-[sub_resource type="CapsuleMesh" id="CapsuleMesh_player"]
-radius = 0.42
-height = 1.8
 
 [sub_resource type="CapsuleShape3D" id="CapsuleShape_player"]
 radius = 0.42
@@ -23,20 +19,17 @@ script = ExtResource("1_player")
 position = Vector3(0, 0.5, 0)
 shape = SubResource("CapsuleShape_player")
 
-[node name="BodyMesh" type="MeshInstance3D" parent="Player"]
-position = Vector3(0, 0.5, 0)
-mesh = SubResource("CapsuleMesh_player")
-
 [node name="CameraPivot" type="Node3D" parent="Player"]
 position = Vector3(0, 1.5, 0)
 rotation_degrees = Vector3(-12, 0, 0)
 
 [node name="SpringArm3D" type="SpringArm3D" parent="Player/CameraPivot"]
-spring_length = 5.5
+spring_length = 6.2
 collision_mask = 1
 
 [node name="Camera3D" type="Camera3D" parent="Player/CameraPivot/SpringArm3D"]
 current = true
+fov = 72.0
 
 [node name="HUD" type="CanvasLayer" parent="."]
 script = ExtResource("2_hud")
