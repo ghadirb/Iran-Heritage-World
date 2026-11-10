@@ -300,7 +300,11 @@ func _build_simorgh() -> void:
 	simorgh_root.add_child(body)
 	var head := _make_mesh(SphereMesh.new(), Vector3(0, 0.25, -0.85), Vector3(0.44, 0.42, 0.44), Color(0.88, 0.78, 0.55))
 	simorgh_root.add_child(head)
-	var crest := _make_mesh(ConeMesh.new(), Vector3(0, 0.65, -0.86), Vector3(0.22, 0.75, 0.22), Color(0.72, 0.22, 0.15))
+	var crest_mesh := CylinderMesh.new()
+	crest_mesh.top_radius = 0.0
+	crest_mesh.bottom_radius = 0.22
+	crest_mesh.height = 0.75
+	var crest := _make_mesh(crest_mesh, Vector3(0, 0.65, -0.86), Vector3.ONE, Color(0.72, 0.22, 0.15))
 	simorgh_root.add_child(crest)
 	for side in [-1.0, 1.0]:
 		var wing := _make_mesh(SphereMesh.new(), Vector3(side * 1.05, 0.05, 0.12), Vector3(1.5, 0.16, 0.55), Color(0.55, 0.25, 0.17))
