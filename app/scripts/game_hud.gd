@@ -75,6 +75,7 @@ func _build_interface() -> void:
 	learning_panel.set_anchors_preset(Control.PRESET_CENTER)
 	learning_panel.position = Vector2(-230, -160)
 	learning_panel.custom_minimum_size = Vector2(460, 320)
+	learning_panel.size = Vector2(460, 320)
 	learning_panel.visible = false
 	root.add_child(learning_panel)
 	var panel_box := VBoxContainer.new()
@@ -109,7 +110,7 @@ func _add_action_button(container: HBoxContainer, caption: String, action: Strin
 	var button := Button.new()
 	button.text = caption
 	button.custom_minimum_size = Vector2(94, 54)
-	button.pressed.connect(func() -> void: Input.action_press(action))
+	button.button_down.connect(func() -> void: Input.action_press(action))
 	button.button_up.connect(func() -> void: Input.action_release(action))
 	container.add_child(button)
 
