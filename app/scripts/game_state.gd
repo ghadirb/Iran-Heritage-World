@@ -2,6 +2,7 @@ extends Node
 ## Global state: touch input, saved progress, quality settings.
 
 signal quality_changed
+signal ui_changed
 
 const SAVE_PATH := "user://progress.json"
 
@@ -52,6 +53,7 @@ func set_ui_scale(value: int) -> void:
 	ui_scale_index = clampi(value, 0, 2)
 	ui_saved = true
 	apply_ui_scale()
+	ui_changed.emit()
 	save_game()
 
 func begin_loading_guard() -> void:

@@ -17,6 +17,9 @@ const NIGHT := Color(0.07, 0.1, 0.13, 0.82)
 
 var root: Control
 var hud_cards: Control
+var card_w := 360.0
+var _last_found := 0
+var _last_total := 1
 var touch: TouchControls
 var title_label: Label
 var subtitle_label: Label
@@ -46,7 +49,9 @@ func _ready() -> void:
 	touch.look_delta.connect(func(rel: Vector2) -> void: look_delta.emit(rel))
 	touch.menu_pressed.connect(show_pause_menu)
 	touch.knowledge_pressed.connect(show_knowledge_list)
+	_update_card_width()
 	_build_hud()
+	GameState.ui_changed.connect(_on_ui_changed)
 	modal_layer = Control.new()
 	modal_layer.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	modal_layer.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -124,7 +129,7 @@ func _button(text: String, callback: Callable, minimum: Vector2 = Vector2(180, 5
 func _build_hud() -> void:
 	var left := VBoxContainer.new()
 	left.position = Vector2(34, 16)
-	left.custom_minimum_size = Vector2(400, 0)
+	left.custom_minimum_size = Vector2(card_w + 40.0, 0)
 	left.add_theme_constant_override("separation", 8)
 	left.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	root.add_child(left)
@@ -151,13 +156,13 @@ func _build_hud() -> void:
 	obj.add_child(obj_box)
 	obj_box.add_child(_label("✦ هدف مرحله", 14, Color(0.5, 0.3, 0.1), true))
 	objective_label = _label("", 17, INK)
-	objective_label.custom_minimum_size = Vector2(360, 0)
+	objective_label.custom_minimum_size = Vector2(card_w, 0)
 	obj_box.add_child(objective_label)
 	progress_label = _label("", 15, INK, true)
 	obj_box.add_child(progress_label)
 	progress_back = ColorRect.new()
 	progress_back.color = Color(0.2, 0.15, 0.1, 0.35)
-	progress_back.custom_minimum_size = Vector2(360, 8)
+	progress_back.custom_minimum_size = Vector2(card_w, 8)
 	obj_box.add_child(progress_back)
 	progress_fill = ColorRect.new()
 	progress_fill.color = Color(0.72, 0.45, 0.1)
@@ -177,6 +182,18 @@ func _build_hud() -> void:
 	toast_label.custom_minimum_size = Vector2(560, 0)
 	toast_panel.add_child(toast_label)
 
+func _update_card_width() -> void:
+	# Bigger UI scale => narrower HUD cards so they do not cover the game view.
+	card_w = [360.0, 320.0, 250.0][GameState.ui_scale_index]
+
+func _on_ui_changed() -> void:
+	_update_card_width()
+	hud_cards.custom_minimum_size = Vector2(card_w + 40.0, 0)
+	objective_label.custom_minimum_size = Vector2(card_w, 0)
+	progress_back.custom_minimum_size = Vector2(card_w, 8)
+	progress_fill.size.x = card_w * float(_last_found) / float(maxi(_last_total, 1))
+	hud_cards.reset_size()
+
 func set_level_info(title: String, subtitle: String) -> void:
 	title_label.text = title
 	subtitle_label.text = subtitle
@@ -187,7 +204,9 @@ func set_objective(text: String) -> void:
 
 func set_progress(caption: String, found: int, total: int) -> void:
 	progress_label.text = "%s: %s از %s" % [caption, fa(found), fa(total)]
-	progress_fill.size.x = 360.0 * float(found) / float(maxi(total, 1))
+	_last_found = found
+	_last_total = total
+	progress_fill.size.x = card_w * float(found) / float(maxi(total, 1))
 
 func toast(text: String, seconds: float = 4.5) -> void:
 	toast_label.text = text

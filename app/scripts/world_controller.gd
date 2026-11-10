@@ -405,6 +405,20 @@ func _build_ambient_particles() -> void:
 	m.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
 	m.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
 	m.albedo_color = Color(1.0, 0.95, 0.75, 0.7)
+	# soft round dot instead of a hard square
+	var grad := Gradient.new()
+	grad.set_color(0, Color(1, 1, 1, 1))
+	grad.set_color(1, Color(1, 1, 1, 0))
+	var tex := GradientTexture2D.new()
+	tex.gradient = grad
+	tex.fill = GradientTexture2D.FILL_RADIAL
+	tex.fill_from = Vector2(0.5, 0.5)
+	tex.fill_to = Vector2(1.0, 0.5)
+	tex.width = 32
+	tex.height = 32
+	m.albedo_texture = tex
+	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	qm.size = Vector2(0.16, 0.16)
 	p.mesh = qm
 	p.material_override = m
 	p.position = Vector3(0, 3.0, 0)
