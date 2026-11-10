@@ -56,6 +56,17 @@ jobs:
           export/android/java_sdk_path = "$JAVA_HOME"
           EOF
 
+      - name: Verify Android toolchain paths
+        shell: bash
+        run: |
+          cat "$HOME/.config/godot/editor_settings-4.4.tres"
+          test -x "$ANDROID_HOME/platform-tools/adb"
+          test -d "$ANDROID_HOME/platforms/android-34"
+          test -d "$ANDROID_HOME/build-tools/34.0.0"
+          test -d "$ANDROID_HOME/ndk/23.2.8568313"
+          test -d "$ANDROID_HOME/cmake/3.10.2.4988404"
+          test -x "$JAVA_HOME/bin/java"
+
       - name: Create temporary Android debug signing key
         shell: bash
         run: |
