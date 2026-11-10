@@ -17,6 +17,9 @@ var shadows := false
 var ui_scale_index := 1              # 0 normal, 1 large, 2 extra large (text/buttons size)
 var ui_saved := false
 const UI_SCALES := [1.0, 1.25, 1.4]
+var music_volume := 0.7              # 0..1
+var ambience_volume := 0.8           # wind + water
+var voice_mode := 1                  # 0 off, 1 manual button, 2 automatic
 var quality_saved := false           # false on first run -> pick a safe default
 const GUARD_PATH := "user://loading.flag"
 var safe_mode_triggered := false
@@ -92,6 +95,9 @@ func load_game() -> void:
 	quality_saved = data.has("quality")
 	ui_scale_index = clampi(int(data.get("ui_scale", 1)), 0, 2)
 	ui_saved = data.has("ui_scale")
+	music_volume = clampf(float(data.get("music_volume", 0.7)), 0.0, 1.0)
+	ambience_volume = clampf(float(data.get("ambience_volume", 0.8)), 0.0, 1.0)
+	voice_mode = clampi(int(data.get("voice_mode", 1)), 0, 2)
 	shadows = bool(data.get("shadows", false))
 
 func save_game() -> void:
@@ -105,6 +111,9 @@ func save_game() -> void:
 		"quality": quality,
 		"shadows": shadows,
 		"ui_scale": ui_scale_index,
+		"music_volume": music_volume,
+		"ambience_volume": ambience_volume,
+		"voice_mode": voice_mode,
 	}))
 
 func complete_level(index: int, star_count: int, knowledge_id: String) -> void:
@@ -126,3 +135,9 @@ func set_shadows(value: bool) -> void:
 	shadows = value
 	save_game()
 	quality_changed.emit()
+
+func set_audio(music_v: float, ambience_v: float, voice_m: int) -> void:
+	music_volume = clampf(music_v, 0.0, 1.0)
+	ambience_volume = clampf(ambience_v, 0.0, 1.0)
+	voice_mode = clampi(voice_m, 0, 2)
+	save_game()

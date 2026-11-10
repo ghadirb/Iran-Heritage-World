@@ -6,6 +6,7 @@ extends RefCounted
 const LEVELS: Array[Dictionary] = [
 	{
 		"id": "alborz_foothills",
+		"audio": {"music": 0.55, "wind": 0.30, "water": 1.0},
 		"title": "دامنه البرز",
 		"subtitle": "مرحله ۱ • ردّ آشیانه",
 		"content_type": "literary_myth",
@@ -28,6 +29,7 @@ const LEVELS: Array[Dictionary] = [
 	},
 	{
 		"id": "stone_pass",
+		"audio": {"music": 0.45, "wind": 0.70, "water": 0.0},
 		"title": "گذرگاه سنگی",
 		"subtitle": "مرحله ۲ • صعود به آشیانه",
 		"content_type": "literary_myth",
@@ -57,6 +59,7 @@ const LEVELS: Array[Dictionary] = [
 	},
 	{
 		"id": "simorgh_nest",
+		"audio": {"music": 0.60, "wind": 0.85, "water": 0.0},
 		"title": "آشیانه سیمرغ",
 		"subtitle": "مرحله ۳ • آتش‌های نشان‌دار",
 		"content_type": "literary_myth",
@@ -88,6 +91,7 @@ const LEVELS: Array[Dictionary] = [
 	},
 	{
 		"id": "return_to_plain",
+		"audio": {"music": 0.50, "wind": 0.30, "water": 0.9},
 		"title": "بازگشت به دشت",
 		"subtitle": "مرحله ۴ • درفش‌های کاروان",
 		"content_type": "creative_reconstruction",
@@ -114,6 +118,7 @@ const LEVELS: Array[Dictionary] = [
 	},
 	{
 		"id": "hall_of_questions",
+		"audio": {"music": 0.70, "wind": 0.05, "water": 0.0},
 		"title": "تالار پرسش‌ها",
 		"subtitle": "مرحله ۵ • آزمون دانش",
 		"content_type": "creative_reconstruction",

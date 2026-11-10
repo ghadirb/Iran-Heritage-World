@@ -140,6 +140,9 @@ func load_level(index: int, announce: bool = true) -> void:
 	_refresh_progress()
 	_apply_quality()
 	level_active = true
+	AudioManager.play_level(level)
+	var lid := str(level["id"])
+	hud.set_level_voice([lid + "__intro", lid + "__objective"] if announce else [lid + "__objective"])
 	if announce:
 		hud.toast(str(level["intro"]), 7.0)
 
@@ -523,6 +526,8 @@ func _interact() -> void:
 		"clue":
 			_collect(it)
 			hud.toast(str(d["hint"]), 4.0)
+			if GameState.voice_mode == 2:
+				AudioManager.play_voice("%s__hint_%s" % [str(level["id"]), str(d["id"])])
 			_check_finish()
 		"brazier":
 			_use_brazier(it)
@@ -540,7 +545,7 @@ func _interact() -> void:
 				return
 			hud.show_dialogue(str(d["speaker"]), d["lines"], d.get("choices", []), d.get("after", []), func() -> void:
 				_mark_done(it)
-				_finish_level())
+				_finish_level(), str(d["id"]))
 
 func _collect(it: Dictionary) -> void:
 	var node: Node3D = it["node"]
@@ -633,6 +638,10 @@ func _process(delta: float) -> void:
 		_respawn()
 	var near := _nearest_item()
 	hud.set_interact_ready(not near.is_empty())
+	var river_dist := -1.0
+	if level.has("river"):
+		river_dist = absf(player.global_position.x - terrain.river_x(player.global_position.z))
+	AudioManager.update_ambience(level, player.global_position.y, river_dist)
 	for it in items:
 		var node: Node3D = it["node"]
 		if not is_instance_valid(node):

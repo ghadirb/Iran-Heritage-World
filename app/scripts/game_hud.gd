@@ -17,6 +17,7 @@ const NIGHT := Color(0.07, 0.1, 0.13, 0.82)
 
 var root: Control
 var hud_cards: Control
+var voice_slot: HBoxContainer
 var card_w := 360.0
 var _last_found := 0
 var _last_total := 1
@@ -168,6 +169,9 @@ func _build_hud() -> void:
 	progress_fill.color = Color(0.72, 0.45, 0.1)
 	progress_fill.size = Vector2(0, 8)
 	progress_back.add_child(progress_fill)
+	voice_slot = HBoxContainer.new()
+	voice_slot.alignment = BoxContainer.ALIGNMENT_END
+	obj_box.add_child(voice_slot)
 
 	toast_panel = PanelContainer.new()
 	toast_panel.add_theme_stylebox_override("panel", _style(NIGHT, 14))
@@ -249,6 +253,7 @@ func close_top_modal() -> void:
 	_sync_block()
 
 func close_all_modals() -> void:
+	AudioManager.stop_voice()
 	while not modal_stack.is_empty():
 		close_top_modal()
 
@@ -259,7 +264,39 @@ func _sync_block() -> void:
 func is_modal_open() -> bool:
 	return not modal_stack.is_empty()
 
-func show_dialogue(speaker: String, lines: Array, choices: Array, after_lines: Array, on_done: Callable) -> void:
+# ---------- narration helpers ----------
+
+func _vk(key: String) -> String:
+	return "%s__%s" % [str(LevelData.LEVELS[GameState.current_level]["id"]), key]
+
+## Small "listen" button, or null when narration is off / no audio file exists.
+func _voice_button(keys: Array) -> Button:
+	if GameState.voice_mode == 0:
+		return null
+	var any := false
+	for k in keys:
+		if AudioManager.voice_path(str(k)) != "":
+			any = true
+	if not any:
+		return null
+	var b := _button("▶ شنیدن", func() -> void: AudioManager.play_voice_sequence(keys), Vector2(140, 46))
+	b.add_theme_font_size_override("font_size", 17)
+	return b
+
+func _auto_voice(keys: Array) -> void:
+	if GameState.voice_mode == 2:
+		AudioManager.play_voice_sequence(keys)
+
+## Called by the world when a level starts: narration button on the objective card.
+func set_level_voice(keys: Array) -> void:
+	for c in voice_slot.get_children():
+		c.queue_free()
+	var b := _voice_button(keys)
+	if b:
+		voice_slot.add_child(b)
+	_auto_voice(keys)
+
+func show_dialogue(speaker: String, lines: Array, choices: Array, after_lines: Array, on_done: Callable, voice_key: String = "") -> void:
 	var box := _open_modal(720)
 	box.add_child(_label(speaker, 26, Color(0.45, 0.25, 0.08), true))
 	var body := _label("", 21, INK)
@@ -268,29 +305,54 @@ func show_dialogue(speaker: String, lines: Array, choices: Array, after_lines: A
 	var actions := VBoxContainer.new()
 	actions.add_theme_constant_override("separation", 8)
 	box.add_child(actions)
+	var ids: Array = []
+	for i in range(lines.size()):
+		ids.append("%s_L%d" % [voice_key, i + 1])
 	# Lambdas capture locals by value, so shared state lives in one dictionary.
-	var st := {"queue": lines.duplicate(), "choices_pending": not choices.is_empty(), "step": Callable()}
+	var st := {"queue": lines.duplicate(), "ids": ids, "choices_pending": not choices.is_empty(), "step": Callable()}
 	st["step"] = func() -> void:
 		for c in actions.get_children():
 			c.queue_free()
+		AudioManager.stop_voice()
 		var queue: Array = st["queue"]
+		var qids: Array = st["ids"]
 		if queue.is_empty():
 			close_top_modal()
 			on_done.call()
 			return
 		body.text = str(queue.pop_front())
+		var vkeys: Array = []
+		if voice_key != "" and not qids.is_empty():
+			vkeys = [_vk(str(qids.pop_front()))]
+		var vb := _voice_button(vkeys) if not vkeys.is_empty() else null
 		if queue.is_empty() and st["choices_pending"]:
 			st["choices_pending"] = false
-			for choice in choices:
+			if vb:
+				actions.add_child(vb)
+			for ci in range(choices.size()):
+				var choice: Dictionary = choices[ci]
 				var reply: String = str(choice["reply"])
+				var reply_id := "%s_R%d" % [voice_key, ci + 1]
 				actions.add_child(_button(str(choice["text"]), func() -> void:
 					var q: Array = st["queue"]
+					var qi: Array = st["ids"]
 					q.clear()
+					qi.clear()
 					q.append(reply)
-					q.append_array(after_lines)
+					qi.append(reply_id)
+					for ai in range(after_lines.size()):
+						q.append(after_lines[ai])
+						qi.append("%s_A%d" % [voice_key, ai + 1])
 					(st["step"] as Callable).call(), Vector2(600, 52)))
+			_auto_voice(vkeys)
 			return
-		actions.add_child(_button("ادامه", func() -> void: (st["step"] as Callable).call(), Vector2(200, 52)))
+		var row := HBoxContainer.new()
+		row.add_theme_constant_override("separation", 10)
+		actions.add_child(row)
+		row.add_child(_button("ادامه", func() -> void: (st["step"] as Callable).call(), Vector2(200, 52)))
+		if vb:
+			row.add_child(vb)
+		_auto_voice(vkeys)
 	(st["step"] as Callable).call()
 
 func show_quiz(data: Dictionary, on_result: Callable) -> void:
@@ -304,6 +366,10 @@ func show_quiz(data: Dictionary, on_result: Callable) -> void:
 	var buttons: Array[Button] = []
 	var answer := int(data["answer"])
 	var options: Array = data["options"]
+	var q_key := _vk("%s_q" % str(data["id"]))
+	var e_key := _vk("%s_explain" % str(data["id"]))
+	var bottom := HBoxContainer.new()
+	bottom.add_theme_constant_override("separation", 10)
 	for i in range(options.size()):
 		var idx := i
 		var b := _button(str(options[i]), func() -> void: pass, Vector2(660, 56))
@@ -316,16 +382,28 @@ func show_quiz(data: Dictionary, on_result: Callable) -> void:
 				feedback.text = "✔ درست! " + str(data["explain"])
 				feedback.add_theme_color_override("font_color", Color(0.12, 0.42, 0.2))
 				var cont := _button("ادامه", func() -> void:
+					AudioManager.stop_voice()
 					close_top_modal()
 					on_result.call(true, true), Vector2(200, 52))
 				box.add_child(cont)
+				var eb := _voice_button([e_key])
+				if eb:
+					bottom.add_child(eb)
+				_auto_voice([e_key])
 			else:
 				b.disabled = true
 				feedback.text = "✘ پاسخ درست نیست؛ دوباره فکر کن."
 				feedback.add_theme_color_override("font_color", Color(0.6, 0.15, 0.1))
 				on_result.call(false, false))
 	box.add_child(feedback)
-	box.add_child(_button("بستن", close_top_modal, Vector2(140, 44)))
+	bottom.add_child(_button("بستن", func() -> void:
+		AudioManager.stop_voice()
+		close_top_modal(), Vector2(140, 44)))
+	var qb := _voice_button([q_key])
+	if qb:
+		bottom.add_child(qb)
+	box.add_child(bottom)
+	_auto_voice([q_key])
 
 func show_level_complete(level: Dictionary, star_count: int, has_next: bool, on_next: Callable) -> void:
 	var box := _open_modal(700)
@@ -354,6 +432,11 @@ func show_level_complete(level: Dictionary, star_count: int, has_next: bool, on_
 	row.add_child(_button("منو", func() -> void:
 		close_all_modals()
 		show_main_menu(), Vector2(140, 54)))
+	var k_key := _vk("knowledge")
+	var kb := _voice_button([k_key])
+	if kb:
+		row.add_child(kb)
+	_auto_voice([k_key])
 
 func show_pause_menu() -> void:
 	if not modal_stack.is_empty():
@@ -367,7 +450,7 @@ func show_pause_menu() -> void:
 	box.add_child(_button("انتخاب مرحله", func() -> void:
 		close_all_modals()
 		show_main_menu(), Vector2(380, 54)))
-	_add_quality_controls(box)
+	box.add_child(_button("تنظیمات (کیفیت، صدا، اندازه)", func() -> void: show_settings(show_pause_menu), Vector2(380, 54)))
 
 func _add_quality_controls(box: VBoxContainer) -> void:
 	var quality_names := ["کیفیت: سبک (پیشنهادی گوشی ضعیف)", "کیفیت: متوسط", "کیفیت: بالا"]
@@ -393,13 +476,51 @@ func show_loading(text: String) -> void:
 	box.add_child(_label(text, 24, Color(0.45, 0.25, 0.08), true, HORIZONTAL_ALIGNMENT_CENTER))
 	box.add_child(_label("لطفاً چند لحظه صبر کنید", 15, INK, false, HORIZONTAL_ALIGNMENT_CENTER))
 
-func show_settings() -> void:
+func show_settings(back: Callable = Callable()) -> void:
+	if not back.is_valid():
+		back = show_main_menu
 	close_all_modals()
 	var box := _open_modal(460)
 	box.add_child(_label("تنظیمات", 28, Color(0.45, 0.25, 0.08), true, HORIZONTAL_ALIGNMENT_CENTER))
-	box.add_child(_label("اگر بازی کند است یا گوشی هنگ می‌کند، کیفیت را «سبک» و سایه‌ها را «خاموش» بگذارید.", 15, INK))
 	_add_quality_controls(box)
-	box.add_child(_button("بازگشت", show_main_menu, Vector2(380, 54)))
+	box.add_child(_button("تنظیمات صدا", func() -> void: show_audio_settings(back), Vector2(380, 54)))
+	box.add_child(_button("بازگشت", func() -> void: back.call(), Vector2(380, 54)))
+
+const LEVEL_STEPS := [0.0, 0.35, 0.7, 1.0]
+const LEVEL_NAMES := ["خاموش", "کم", "متوسط", "زیاد"]
+
+func _nearest_step(v: float) -> int:
+	var best := 0
+	for i in range(LEVEL_STEPS.size()):
+		if absf(LEVEL_STEPS[i] - v) < absf(LEVEL_STEPS[best] - v):
+			best = i
+	return best
+
+func show_audio_settings(back: Callable) -> void:
+	close_all_modals()
+	var box := _open_modal(460)
+	box.add_child(_label("تنظیمات صدا", 28, Color(0.45, 0.25, 0.08), true, HORIZONTAL_ALIGNMENT_CENTER))
+	var mi := [_nearest_step(GameState.music_volume)]
+	var mb := _button("موسیقی: " + LEVEL_NAMES[mi[0]], func() -> void: pass, Vector2(380, 54))
+	mb.pressed.connect(func() -> void:
+		mi[0] = (mi[0] + 1) % LEVEL_STEPS.size()
+		GameState.set_audio(LEVEL_STEPS[mi[0]], GameState.ambience_volume, GameState.voice_mode)
+		mb.text = "موسیقی: " + LEVEL_NAMES[mi[0]])
+	box.add_child(mb)
+	var ai := [_nearest_step(GameState.ambience_volume)]
+	var ab := _button("صدای طبیعت (باد و آب): " + LEVEL_NAMES[ai[0]], func() -> void: pass, Vector2(380, 54))
+	ab.pressed.connect(func() -> void:
+		ai[0] = (ai[0] + 1) % LEVEL_STEPS.size()
+		GameState.set_audio(GameState.music_volume, LEVEL_STEPS[ai[0]], GameState.voice_mode)
+		ab.text = "صدای طبیعت (باد و آب): " + LEVEL_NAMES[ai[0]])
+	box.add_child(ab)
+	var voice_names := ["روایت صوتی: خاموش", "روایت صوتی: با دکمه «شنیدن»", "روایت صوتی: خودکار"]
+	var vb := _button(voice_names[GameState.voice_mode], func() -> void: pass, Vector2(380, 54))
+	vb.pressed.connect(func() -> void:
+		GameState.set_audio(GameState.music_volume, GameState.ambience_volume, (GameState.voice_mode + 1) % 3)
+		vb.text = voice_names[GameState.voice_mode])
+	box.add_child(vb)
+	box.add_child(_button("بازگشت", func() -> void: show_settings(back), Vector2(380, 54)))
 
 func show_knowledge_list() -> void:
 	if not modal_stack.is_empty():
@@ -422,6 +543,7 @@ func show_knowledge_list() -> void:
 func show_main_menu() -> void:
 	close_all_modals()
 	hud_cards.visible = false
+	AudioManager.enter_menu()
 	var box := _open_modal(760)
 	box.add_child(_label("ایران؛ سفر در تاریخ و اسطوره‌ها", 32, Color(0.45, 0.25, 0.08), true, HORIZONTAL_ALIGNMENT_CENTER))
 	box.add_child(_label("فصل نخست • راز زال و سیمرغ", 18, Color(0.5, 0.35, 0.12), false, HORIZONTAL_ALIGNMENT_CENTER))
@@ -445,5 +567,5 @@ func show_main_menu() -> void:
 	box.add_child(_button("ادامه سفر", func() -> void:
 		close_all_modals()
 		start_level.emit(cont_idx), Vector2(360, 60)))
-	box.add_child(_button("تنظیمات و کیفیت تصویر", show_settings, Vector2(360, 54)))
+	box.add_child(_button("تنظیمات (کیفیت، صدا، اندازه)", func() -> void: show_settings(show_main_menu), Vector2(360, 54)))
 	box.add_child(_label("این بازی روایتی ادبی و بازآفرینی تخیلی است؛ زال و سیمرغ شخصیت‌های حماسی شاهنامه‌اند، نه اشخاص تاریخیِ اثبات‌شده.", 13, Color(0.4, 0.3, 0.2)))
