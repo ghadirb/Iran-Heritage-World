@@ -5,11 +5,29 @@ class_name PlayerController
 @export var acceleration: float = 18.0
 @export var jump_velocity: float = 4.5
 @export var rotation_speed: float = 10.0
+@export var touch_look_sensitivity: float = 0.006
+@export var minimum_camera_pitch: float = -0.85
+@export var maximum_camera_pitch: float = -0.08
+
+@onready var camera_pivot: Node3D = $CameraPivot
 
 var gravity: float = ProjectSettings.get_setting("physics/3d/default_gravity")
 
 func _ready() -> void:
 	_register_input_actions()
+
+func _unhandled_input(event: InputEvent) -> void:
+	# The left side of the screen is reserved for movement buttons.
+	# Dragging on the right side rotates the third-person camera.
+	if event is InputEventScreenDrag:
+		var screen_width := get_viewport_rect().size.x
+		if event.position.x >= screen_width * 0.38:
+			camera_pivot.rotation.y -= event.relative.x * touch_look_sensitivity
+			camera_pivot.rotation.x = clampf(
+				camera_pivot.rotation.x - event.relative.y * touch_look_sensitivity,
+				minimum_camera_pitch,
+				maximum_camera_pitch
+			)
 
 func _physics_process(delta: float) -> void:
 	var input_vector := Input.get_vector("move_left", "move_right", "move_forward", "move_back")
