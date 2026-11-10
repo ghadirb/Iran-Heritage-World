@@ -56,13 +56,22 @@ jobs:
           export/android/java_sdk_path = "$JAVA_HOME"
           EOF
 
+      - name: Create temporary Android debug signing key
+        shell: bash
+        run: |
+          mkdir -p "$HOME/.android"
+          keytool -genkeypair -v -keystore "$HOME/.android/debug.keystore" -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
+          echo "GODOT_ANDROID_KEYSTORE_DEBUG_PATH=$HOME/.android/debug.keystore" >> "$GITHUB_ENV"
+          echo "GODOT_ANDROID_KEYSTORE_DEBUG_USER=androiddebugkey" >> "$GITHUB_ENV"
+          echo "GODOT_ANDROID_KEYSTORE_DEBUG_PASSWORD=android" >> "$GITHUB_ENV"
+
       - name: Import project
         run: godot --headless --editor --path app --quit
 
       - name: Export debug APK
         run: |
           mkdir -p build
-          godot --headless --path app --export-debug "Android" build/IranHeritageWorld-debug.apk
+          godot --headless --verbose --path app --export-debug "Android" build/IranHeritageWorld-debug.apk
           test -s build/IranHeritageWorld-debug.apk
 
       - name: Upload APK artifact
