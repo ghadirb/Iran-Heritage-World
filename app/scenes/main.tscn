@@ -1,4 +1,4 @@
-[gd_scene load_steps=8 format=3]
+[gd_scene load_steps=6 format=3]
 
 [ext_resource type="Script" path="res://scripts/player_controller.gd" id="1_player"]
 [ext_resource type="Script" path="res://scripts/game_hud.gd" id="2_hud"]
@@ -12,28 +12,8 @@ height = 1.8
 radius = 0.42
 height = 1.8
 
-[sub_resource type="BoxShape3D" id="BoxShape_floor"]
-size = Vector3(80, 1, 80)
-
-[sub_resource type="BoxMesh" id="BoxMesh_floor"]
-size = Vector3(80, 1, 80)
-
 [node name="IranHeritageWorld" type="Node3D"]
 script = ExtResource("3_world")
-
-[node name="DirectionalLight3D" type="DirectionalLight3D" parent="."]
-rotation_degrees = Vector3(-48, -32, 0)
-light_energy = 1.15
-shadow_enabled = true
-
-[node name="Ground" type="StaticBody3D" parent="."]
-position = Vector3(0, -0.55, 0)
-
-[node name="Mesh" type="MeshInstance3D" parent="Ground"]
-mesh = SubResource("BoxMesh_floor")
-
-[node name="CollisionShape3D" type="CollisionShape3D" parent="Ground"]
-shape = SubResource("BoxShape_floor")
 
 [node name="Player" type="CharacterBody3D" parent="."]
 position = Vector3(0, 0.4, 0)
