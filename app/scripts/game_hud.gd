@@ -125,8 +125,8 @@ func _build_interface() -> void:
 	learning_text.add_theme_font_size_override("font_size", 18)
 	panel_box.add_child(learning_text)
 
-func _panel(at: Vector2, panel_size: Vector2, parent: Control, color: Color) -> PanelContainer:
-	var panel := PanelContainer.new()
+func _panel(at: Vector2, panel_size: Vector2, parent: Control, color: Color) -> Panel:
+	var panel := Panel.new()
 	panel.position = at
 	panel.custom_minimum_size = panel_size
 	panel.size = panel_size
