@@ -43,7 +43,7 @@ func _ready() -> void:
 	hud.jump_pressed.connect(player.request_jump)
 	hud.look_delta.connect(player.add_look)
 	hud.interact_pressed.connect(_interact)
-	hud.start_level.connect(load_level)
+	hud.start_level.connect(_start_level_async)
 	hud.restart_requested.connect(func() -> void: load_level(level_index))
 	GameState.quality_changed.connect(_apply_quality)
 	if selftest:
@@ -54,8 +54,11 @@ func _ready() -> void:
 	if shot != "":
 		await _run_screenshot(shot)
 		return
-	load_level(clampi(GameState.unlocked_level, 0, LevelData.LEVELS.size() - 1), false)
+	# No 3D level behind the menu: building it before the player taps anything
+	# froze weak phones and made the menu unresponsive.
 	hud.show_main_menu()
+	if GameState.safe_mode_triggered:
+		hud.toast("بازی در حالت سبک (کم‌مصرف) شروع شد. از «تنظیمات» می‌توانید کیفیت را تغییر دهید.", 8.0)
 
 func _arg_value(key: String) -> String:
 	for a in OS.get_cmdline_user_args():
@@ -87,6 +90,16 @@ func _run_screenshot(path: String) -> void:
 	get_tree().quit()
 
 # ---------- level loading ----------
+
+func _start_level_async(index: int) -> void:
+	hud.show_loading("در حال بارگذاری مرحله…")
+	await get_tree().process_frame
+	await get_tree().process_frame
+	GameState.begin_loading_guard()
+	load_level(index, true)
+	await get_tree().process_frame
+	await get_tree().process_frame
+	GameState.end_loading_guard()
 
 func load_level(index: int, announce: bool = true) -> void:
 	level_index = clampi(index, 0, LevelData.LEVELS.size() - 1)
@@ -199,13 +212,14 @@ func _build_environment() -> void:
 
 func _apply_quality() -> void:
 	var q := GameState.quality
-	var modes := [Viewport.MSAA_DISABLED, Viewport.MSAA_2X, Viewport.MSAA_4X]
-	get_viewport().msaa_3d = modes[q]
+	GameState.apply_engine_quality()
 	if sun:
 		sun.shadow_enabled = GameState.shadows
 	if world_env:
-		world_env.environment.glow_enabled = q >= 1
-	var fractions := [0.35, 0.7, 1.0]
+		world_env.environment.glow_enabled = q >= 2
+		world_env.environment.fog_enabled = true
+		world_env.environment.adjustment_enabled = q >= 1
+	var fractions := [0.3, 0.6, 1.0]
 	for inst in grass_instances:
 		var total := inst.multimesh.instance_count
 		inst.multimesh.visible_instance_count = int(float(total) * fractions[q])

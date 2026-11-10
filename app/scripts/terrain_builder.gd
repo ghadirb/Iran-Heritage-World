@@ -144,6 +144,7 @@ func _color_at(x: float, z: float, h: float, n: Vector3) -> Color:
 func terrain_material() -> ShaderMaterial:
 	var mat := ShaderMaterial.new()
 	mat.shader = load("res://shaders/terrain.gdshader")
+	mat.set_shader_parameter("detail", 1.0 if GameState.quality >= 1 else 0.0)
 	return mat
 
 # ---------- water ----------

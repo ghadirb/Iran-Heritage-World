@@ -344,7 +344,10 @@ func show_pause_menu() -> void:
 	box.add_child(_button("انتخاب مرحله", func() -> void:
 		close_all_modals()
 		show_main_menu(), Vector2(380, 54)))
-	var quality_names := ["کیفیت: سبک", "کیفیت: متوسط", "کیفیت: بالا"]
+	_add_quality_controls(box)
+
+func _add_quality_controls(box: VBoxContainer) -> void:
+	var quality_names := ["کیفیت: سبک (پیشنهادی گوشی ضعیف)", "کیفیت: متوسط", "کیفیت: بالا"]
 	var qb := _button(quality_names[GameState.quality], func() -> void: pass, Vector2(380, 54))
 	qb.pressed.connect(func() -> void:
 		GameState.set_quality((GameState.quality + 1) % 3)
@@ -355,6 +358,19 @@ func show_pause_menu() -> void:
 		GameState.set_shadows(not GameState.shadows)
 		sb.text = "سایه‌ها: روشن" if GameState.shadows else "سایه‌ها: خاموش")
 	box.add_child(sb)
+
+func show_loading(text: String) -> void:
+	var box := _open_modal(420)
+	box.add_child(_label(text, 24, Color(0.45, 0.25, 0.08), true, HORIZONTAL_ALIGNMENT_CENTER))
+	box.add_child(_label("لطفاً چند لحظه صبر کنید", 15, INK, false, HORIZONTAL_ALIGNMENT_CENTER))
+
+func show_settings() -> void:
+	close_all_modals()
+	var box := _open_modal(460)
+	box.add_child(_label("تنظیمات", 28, Color(0.45, 0.25, 0.08), true, HORIZONTAL_ALIGNMENT_CENTER))
+	box.add_child(_label("اگر بازی کند است یا گوشی هنگ می‌کند، کیفیت را «سبک» و سایه‌ها را «خاموش» بگذارید.", 15, INK))
+	_add_quality_controls(box)
+	box.add_child(_button("بازگشت", show_main_menu, Vector2(380, 54)))
 
 func show_knowledge_list() -> void:
 	if not modal_stack.is_empty():
@@ -399,4 +415,5 @@ func show_main_menu() -> void:
 	box.add_child(_button("ادامه سفر", func() -> void:
 		close_all_modals()
 		start_level.emit(cont_idx), Vector2(360, 60)))
+	box.add_child(_button("تنظیمات و کیفیت تصویر", show_settings, Vector2(360, 54)))
 	box.add_child(_label("این بازی روایتی ادبی و بازآفرینی تخیلی است؛ زال و سیمرغ شخصیت‌های حماسی شاهنامه‌اند، نه اشخاص تاریخیِ اثبات‌شده.", 13, Color(0.4, 0.3, 0.2)))
