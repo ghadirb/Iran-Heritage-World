@@ -75,6 +75,15 @@ jobs:
           echo "GODOT_ANDROID_KEYSTORE_DEBUG_PATH=$GITHUB_WORKSPACE/app/debug.keystore" >> "$GITHUB_ENV"
           echo "GODOT_ANDROID_KEYSTORE_DEBUG_USER=androiddebugkey" >> "$GITHUB_ENV"
           echo "GODOT_ANDROID_KEYSTORE_DEBUG_PASSWORD=android" >> "$GITHUB_ENV"
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          preset = Path("app/export_presets.cfg")
+          data = preset.read_text()
+          data = data.replace('keystore/debug="res://debug.keystore"', f'keystore/debug="{Path("app/debug.keystore").resolve()}"')
+          preset.write_text(data)
+          print("Configured absolute debug keystore path in Android export preset.")
+          PY
 
       - name: Import project
         run: godot --headless --editor --path app --quit
