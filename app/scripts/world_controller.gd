@@ -694,8 +694,37 @@ func _update_platform_checkpoint() -> void:
 
 # ---------- self test (CI) ----------
 
+func _report_missing_voice() -> void:
+	# Informational only: lists narration lines that have no audio file yet.
+	var missing := 0
+	var total := 0
+	for lv in LevelData.LEVELS:
+		var lid := str(lv["id"])
+		var keys: Array = ["intro", "objective", "knowledge"]
+		for d in lv["interactables"]:
+			var id := str(d["id"])
+			match str(d["kind"]):
+				"clue":
+					keys.append("hint_" + id)
+				"quiz":
+					keys.append_array([id + "_q", id + "_explain"])
+				"npc":
+					for i in range((d["lines"] as Array).size()):
+						keys.append("%s_L%d" % [id, i + 1])
+					for j in range((d.get("choices", []) as Array).size()):
+						keys.append("%s_R%d" % [id, j + 1])
+					for k in range((d.get("after", []) as Array).size()):
+						keys.append("%s_A%d" % [id, k + 1])
+		for key in keys:
+			total += 1
+			if AudioManager.voice_path("%s__%s" % [lid, key]) == "":
+				missing += 1
+				print("VOICE missing: %s__%s" % [lid, key])
+	print("VOICE coverage: %d/%d" % [total - missing, total])
+
 func _run_selftest() -> void:
 	var failures := 0
+	_report_missing_voice()
 	for i in range(LevelData.LEVELS.size()):
 		load_level(i, false)
 		await get_tree().process_frame
