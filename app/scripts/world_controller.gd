@@ -361,9 +361,16 @@ func chain_position(i: int) -> Vector3:
 	var t := float(i) / float(maxi(count - 1, 1))
 	var z := lerpf(float(ch["z0"]), float(ch["z1"]), t)
 	var x := terrain.path_x(z) + sin(float(i) * 1.4) * float(ch["sway"])
-	var z_start := float(ch["z0"]) + 3.0
-	var y0 := terrain.height(terrain.path_x(z_start), z_start)
-	return Vector3(x, y0 + 0.1 + float(i) * float(ch["rise"]), z)
+	# Anchor the first stone to solid ground BEFORE the chasm, not to the
+	# terrain height inside the chasm (which is dozens of metres lower).
+	var z_start := float(ch["z0"]) + 5.0
+	var z_end := float(ch["z1"]) - 5.0
+	var start_x := terrain.path_x(z_start)
+	var end_x := terrain.path_x(z_end)
+	var y_start := terrain.height(start_x, z_start) + 0.12
+	var y_end := terrain.height(end_x, z_end) + 0.65
+	var platform_y := lerpf(y_start, y_end, t)
+	return Vector3(x, platform_y, z)
 
 func _build_platform_chain() -> void:
 	var ch: Dictionary = level["chain"]
@@ -636,6 +643,8 @@ func _process(delta: float) -> void:
 	PropFactory.animate_zal(player.art, moving, t)
 	if player.global_position.y < kill_y:
 		_respawn()
+	if level.has("chain") and player.is_on_floor():
+		_update_platform_checkpoint()
 	var near := _nearest_item()
 	hud.set_interact_ready(not near.is_empty())
 	var river_dist := -1.0
@@ -673,6 +682,15 @@ func _respawn() -> void:
 	player.global_position = checkpoint
 	player.velocity = Vector3.ZERO
 	hud.toast("از لبه افتادی؛ دوباره تلاش کن.", 3.0)
+
+func _update_platform_checkpoint() -> void:
+	var ch: Dictionary = level["chain"]
+	for i in range(int(ch["count"])):
+		var p := chain_position(i)
+		var horizontal := Vector2(player.global_position.x - p.x, player.global_position.z - p.z).length()
+		if horizontal <= 1.45 and absf(player.global_position.y - p.y) <= 1.9:
+			checkpoint = player.global_position
+			return
 
 # ---------- self test (CI) ----------
 

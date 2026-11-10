@@ -39,7 +39,7 @@ const LEVELS: Array[Dictionary] = [
 		"length": 120.0, "seed": 23, "amp": 2.0, "valley_half": 10.0, "mount_rise": 0.2, "path_sway": 1.5,
 		"chasm": {"z0": -20.0, "z1": -88.0, "depth": 36.0},
 		"step": {"z": -90.0, "height": 4.4, "blend": 5.0},
-		"chain": {"z0": -24.0, "z1": -86.0, "count": 19, "sway": 2.4, "rise": 0.23},
+		"chain": {"z0": -22.5, "z1": -86.0, "count": 19, "sway": 1.1, "rise": 0.0},
 		"kill_y": -14.0,
 		"grass": "#6b8f4d", "grass2": "#9aa655", "rock": "#8a8478", "path": "#b08c5e", "snow": "#f3f5f9", "snow_line": 15.0,
 		"sky_top": "#4a82c9", "sky_horizon": "#f6dcb6", "fog": "#c6d3dc", "fog_density": 0.006,
