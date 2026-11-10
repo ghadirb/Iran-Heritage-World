@@ -166,9 +166,10 @@ func _interact_nearest() -> void:
 		hud.show_message("چیزی برای تعامل در نزدیکی تو نیست. به نشانه‌های نورانی نزدیک‌تر شو.")
 		return
 	var clue_id := str(nearest.get_meta("clue_id"))
+	var clue_hint := str(nearest.get_meta("clue_hint"))
 	found_clues.append(clue_id)
 	nearest.queue_free()
-	hud.show_message(str(nearest.get_meta("clue_hint")))
+	hud.show_message(clue_hint)
 	hud.set_mission("ردّ آشیانه", "نشانه‌های پیدا شده: %d از %d" % [found_clues.size(), clues_required])
 	if found_clues.size() == clues_required:
 		_complete_mission()
