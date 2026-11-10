@@ -1,397 +1,681 @@
 extends Node3D
 class_name WorldController
+## Builds each chapter from LevelData, runs interactions and mission flow.
 
-@onready var player: CharacterBody3D = $Player
-@onready var hud: CanvasLayer = $HUD
+const INTERACT_RADIUS := 4.2
 
-var found_clues: Array[String] = []
-var clues_required := 3
-var mission_complete := false
-var clue_nodes: Array[Node3D] = []
-var simorgh_wings: Array[MeshInstance3D] = []
-var player_art: Node3D
-var player_left_arm: Node3D
-var player_right_arm: Node3D
-var simorgh_root: Node3D
+@onready var hud: GameHUD = $HUD
 
-const CLUES := [
-	{"id":"white_feather","title":"پر سپید","position":Vector3(-5.0, 0.65, -7.0),"hint":"ردی از پرهای سپید در کنار صخره پیدا کردی."},
-	{"id":"old_nest","title":"شاخه‌های آشیانه","position":Vector3(5.5, 0.65, -11.0),"hint":"شاخه‌های بزرگ، از نزدیکی یک آشیانه خبر می‌دهند."},
-	{"id":"mountain_mark","title":"نشان کوهستان","position":Vector3(1.0, 0.65, -19.0),"hint":"نقش کهنی روی سنگ دیده می‌شود؛ راه به سوی بلندی ادامه دارد."}
-]
+var player: PlayerController
+var level_root: Node3D
+var level: Dictionary = {}
+var level_index := 0
+var terrain: TerrainBuilder
+var items: Array[Dictionary] = []
+var sun: DirectionalLight3D
+var world_env: WorldEnvironment
+var grass_instances: Array[MultiMeshInstance3D] = []
+var clouds: Array[MeshInstance3D] = []
+var simorgh: Node3D
+var spawn_point := Vector3.ZERO
+var checkpoint := Vector3.ZERO
+var brazier_next := 0
+var mistakes := 0
+var level_active := false
+var finished := false
+var kill_y := -30.0
+var selftest := false
 
 func _ready() -> void:
-	_register_actions()
-	_build_landscape()
-	_build_player_art()
-	_build_simorgh()
-	_spawn_clues()
-	hud.set_mission("ردّ آشیانه", "سه نشانه را در کوهستان پیدا کن.")
-	hud.show_message("به دامنه البرز خوش آمدی. مسیر سنگی را دنبال کن و نشانه‌های زرین را بیاب.")
+	selftest = OS.get_cmdline_user_args().has("--selftest")
+	player = PlayerController.new()
+	player.name = "Player"
+	var shape := CollisionShape3D.new()
+	var capsule := CapsuleShape3D.new()
+	capsule.radius = 0.42
+	capsule.height = 1.8
+	shape.shape = capsule
+	shape.position = Vector3(0, 0.9, 0)
+	player.add_child(shape)
+	player.art = PropFactory.make_zal()
+	player.add_child(player.art)
+	add_child(player)
+	hud.jump_pressed.connect(player.request_jump)
+	hud.look_delta.connect(player.add_look)
+	hud.interact_pressed.connect(_interact)
+	hud.start_level.connect(load_level)
+	hud.restart_requested.connect(func() -> void: load_level(level_index))
+	GameState.quality_changed.connect(_apply_quality)
+	if selftest:
+		await get_tree().process_frame
+		await _run_selftest()
+		return
+	var shot := _arg_value("--shot")
+	if shot != "":
+		await _run_screenshot(shot)
+		return
+	load_level(clampi(GameState.unlocked_level, 0, LevelData.LEVELS.size() - 1), false)
+	hud.show_main_menu()
 
-func _process(delta: float) -> void:
-	if Input.is_action_just_pressed("interact"):
-		_interact_nearest()
-	if is_instance_valid(player_art):
-		var moving := Vector2(player.velocity.x, player.velocity.z).length() > 0.25
-		var swing := sin(Time.get_ticks_msec() * 0.009) * 0.38 if moving else 0.0
-		player_left_arm.rotation.x = swing
-		player_right_arm.rotation.x = -swing
-		player_art.position.y = 0.03 + (absf(sin(Time.get_ticks_msec() * 0.012)) * 0.045 if moving else 0.0)
-	if is_instance_valid(simorgh_root):
-		simorgh_root.position.y = 7.4 + sin(Time.get_ticks_msec() * 0.0012) * 0.32
-		for index in range(simorgh_wings.size()):
-			simorgh_wings[index].rotation.z = sin(Time.get_ticks_msec() * 0.008 + float(index)) * 0.34
+func _arg_value(key: String) -> String:
+	for a in OS.get_cmdline_user_args():
+		if a.begins_with(key + "="):
+			return a.substr(key.length() + 1)
+	return ""
 
-func _register_actions() -> void:
-	if not InputMap.has_action("interact"):
-		InputMap.add_action("interact")
-	var event := InputEventKey.new()
-	event.physical_keycode = KEY_E
-	InputMap.action_add_event("interact", event)
+## Developer helper: godot --path app -- --shot=out.png --level=0 --z=-20 --yaw=0.4
+func _run_screenshot(path: String) -> void:
+	var lv := int(_arg_value("--level")) if _arg_value("--level") != "" else 0
+	load_level(lv, false)
+	hud.close_all_modals()
+	if _arg_value("--z") != "":
+		var z := float(_arg_value("--z"))
+		var x := terrain.path_x(z)
+		player.global_position = Vector3(x, terrain.height(x, z) + 1.0, z)
+	if _arg_value("--yaw") != "":
+		player.yaw = float(_arg_value("--yaw"))
+	if _arg_value("--pitch") != "":
+		player.pitch = float(_arg_value("--pitch"))
+	hud.toast("آزمایش نمایش متن فارسی و رابط کاربری", 60.0)
+	for _i in range(90):
+		await get_tree().process_frame
+	player.rig.global_position = player.global_position + Vector3(0, 1.5, 0)
+	for _i in range(20):
+		await get_tree().process_frame
+	get_viewport().get_texture().get_image().save_png(path)
+	print("saved ", path)
+	get_tree().quit()
 
-func _build_landscape() -> void:
-	var world_env := WorldEnvironment.new()
+# ---------- level loading ----------
+
+func load_level(index: int, announce: bool = true) -> void:
+	level_index = clampi(index, 0, LevelData.LEVELS.size() - 1)
+	GameState.current_level = level_index
+	level = LevelData.LEVELS[level_index]
+	level_active = false
+	finished = false
+	mistakes = 0
+	brazier_next = 0
+	items.clear()
+	grass_instances.clear()
+	clouds.clear()
+	simorgh = null
+	if level_root:
+		level_root.queue_free()
+	level_root = Node3D.new()
+	level_root.name = "Level"
+	add_child(level_root)
+	terrain = TerrainBuilder.new(level)
+	kill_y = float(level.get("kill_y", -30.0))
+	_build_environment()
+	_build_ground()
+	_build_vegetation()
+	_build_decor()
+	_build_interactables()
+	_build_ambient_particles()
+	var sp: Vector2 = level["spawn"]
+	var sx := terrain.path_x(sp.y) + sp.x
+	spawn_point = Vector3(sx, terrain.height(sx, sp.y) + 1.2, sp.y)
+	checkpoint = spawn_point
+	player.global_position = spawn_point
+	player.velocity = Vector3.ZERO
+	player.snap_camera_behind(0.0)
+	player.input_enabled = true
+	hud.close_all_modals()
+	hud.set_level_info(str(level["title"]), str(level["subtitle"]))
+	hud.set_objective(str(level["objective"]))
+	_refresh_progress()
+	_apply_quality()
+	level_active = true
+	if announce:
+		hud.toast(str(level["intro"]), 7.0)
+
+# ---------- environment ----------
+
+func _build_environment() -> void:
+	world_env = WorldEnvironment.new()
 	var env := Environment.new()
 	env.background_mode = Environment.BG_SKY
 	var sky := Sky.new()
-	var sky_mat := ProceduralSkyMaterial.new()
-	sky_mat.sky_top_color = Color(0.12, 0.25, 0.43)
-	sky_mat.sky_horizon_color = Color(0.83, 0.67, 0.48)
-	sky_mat.ground_bottom_color = Color(0.13, 0.19, 0.18)
-	sky_mat.ground_horizon_color = Color(0.48, 0.47, 0.39)
-	sky.sky_material = sky_mat
+	var sm := ProceduralSkyMaterial.new()
+	sm.sky_top_color = Color(str(level["sky_top"]))
+	sm.sky_horizon_color = Color(str(level["sky_horizon"]))
+	sm.ground_horizon_color = Color(str(level["sky_horizon"])).darkened(0.1)
+	sm.ground_bottom_color = Color(str(level["fog"])).darkened(0.35)
+	sm.sky_curve = 0.18
+	sm.sun_angle_max = 24.0
+	sm.sun_curve = 0.12
+	sky.sky_material = sm
 	env.sky = sky
-	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-	env.ambient_light_color = Color(0.64, 0.72, 0.82)
-	env.ambient_light_energy = 0.72
+	env.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
+	env.ambient_light_sky_contribution = 0.45
+	env.ambient_light_color = Color(str(level["ambient"]))
+	env.ambient_light_energy = 0.9
 	env.tonemap_mode = Environment.TONE_MAPPER_FILMIC
+	env.tonemap_white = 5.0
 	env.fog_enabled = true
-	env.fog_light_color = Color(0.61, 0.68, 0.72)
-	env.fog_density = 0.006
+	env.fog_light_color = Color(str(level["fog"]))
+	env.fog_density = float(level["fog_density"])
+	env.fog_sky_affect = 0.55
+	env.glow_enabled = true
+	env.glow_intensity = 0.7
+	env.glow_bloom = 0.06
+	env.glow_hdr_threshold = 1.1
+	env.adjustment_enabled = true
+	env.adjustment_contrast = 1.08
+	env.adjustment_saturation = 1.18
 	world_env.environment = env
-	add_child(world_env)
+	level_root.add_child(world_env)
 
-	var sun := DirectionalLight3D.new()
-	sun.rotation_degrees = Vector3(-42, -32, 0)
-	sun.light_color = Color(1.0, 0.82, 0.62)
-	sun.light_energy = 1.25
+	sun = DirectionalLight3D.new()
+	sun.rotation_degrees = level["sun_rot"]
+	sun.light_color = Color(str(level["sun_color"]))
+	sun.light_energy = float(level["sun_energy"])
 	sun.shadow_enabled = true
-	sun.directional_shadow_max_distance = 48.0
-	add_child(sun)
+	sun.shadow_bias = 0.12
+	sun.shadow_normal_bias = 2.6
+	sun.shadow_blur = 1.4
+	sun.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_2_SPLITS
+	sun.directional_shadow_max_distance = 70.0
+	level_root.add_child(sun)
 
-	_add_ground()
-	_add_trail()
-	_add_mountain_ridges()
-	_add_forest()
-	_add_stream()
-	_add_ancient_ruins()
-	_add_brazier()
-
-func _add_ground() -> void:
-	var ground := StaticBody3D.new()
-	ground.name = "ValleyGround"
-	add_child(ground)
-	var mesh_node := MeshInstance3D.new()
-	var plane := PlaneMesh.new()
-	plane.size = Vector2(58, 72)
-	plane.subdivide_width = 12
-	plane.subdivide_depth = 16
-	mesh_node.mesh = plane
-	mesh_node.position = Vector3(0, -0.12, -15)
-	mesh_node.material_override = _material(Color(0.24, 0.32, 0.25), 1.0)
-	ground.add_child(mesh_node)
-	var collision := CollisionShape3D.new()
-	var shape := BoxShape3D.new()
-	shape.size = Vector3(58, 0.5, 72)
-	collision.shape = shape
-	collision.position = Vector3(0, -0.38, -15)
-	ground.add_child(collision)
-
-func _add_trail() -> void:
-	for i in range(13):
-		var z := -float(i) * 2.55 - 1.0
-		var x := sin(float(i) * 0.42) * 1.1
-		var stone := MeshInstance3D.new()
-		var mesh := BoxMesh.new()
-		mesh.size = Vector3(2.5 + sin(float(i)) * 0.35, 0.12, 1.9)
-		stone.mesh = mesh
-		stone.position = Vector3(x, 0.02, z)
-		stone.rotation.y = sin(float(i) * 0.8) * 0.08
-		stone.material_override = _material(Color(0.48, 0.39, 0.28), 1.0)
-		add_child(stone)
-
-func _add_mountain_ridges() -> void:
-	for i in range(11):
-		var side := -1.0 if i % 2 == 0 else 1.0
-		var peak := MeshInstance3D.new()
-		var cone := CylinderMesh.new()
-		cone.top_radius = 0.0
-		cone.bottom_radius = 5.5 + float(i % 3) * 1.2
-		cone.height = 15.0 + float(i % 4) * 2.5
-		cone.radial_segments = 7
-		peak.mesh = cone
-		peak.position = Vector3(side * (15.0 + float(i % 3) * 2.0), 5.7, -float(i) * 5.0 - 5.0)
-		peak.rotation.z = side * -0.12
-		peak.material_override = _material(Color(0.30 + float(i % 3) * 0.025, 0.36 + float(i % 2) * 0.025, 0.37), 1.0)
-		add_child(peak)
-	for i in range(8):
-		var rock_at := Vector3(-1.0 if i % 2 == 0 else 1.0, 3.2 + float(i % 3), -23.0 - float(i) * 3.1)
-		_add_rock(rock_at, Vector3(8.0, 6.0, 7.0), Color(0.42, 0.45, 0.43))
-
-func _add_forest() -> void:
-	for i in range(34):
-		var side := -1.0 if i % 2 == 0 else 1.0
-		var x := side * (5.8 + float((i * 7) % 13))
-		var z := -float((i * 11) % 46) - 1.5
-		_add_tree(Vector3(x, 0.0, z), 0.78 + float(i % 4) * 0.12)
-
-func _add_stream() -> void:
-	var water := MeshInstance3D.new()
-	var mesh := PlaneMesh.new()
-	mesh.size = Vector2(1.65, 38.0)
-	mesh.subdivide_depth = 8
-	water.mesh = mesh
-	water.position = Vector3(8.8, 0.035, -17.0)
-	water.rotation_degrees.y = -7.0
-	var water_mat := StandardMaterial3D.new()
-	water_mat.albedo_color = Color(0.16, 0.48, 0.59, 0.78)
-	water_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	water_mat.roughness = 0.22
-	water_mat.metallic = 0.12
-	water_mat.emission_enabled = true
-	water_mat.emission = Color(0.035, 0.12, 0.16)
-	water_mat.emission_energy_multiplier = 0.35
-	water.material_override = water_mat
-	add_child(water)
+	var cloud_mat := StandardMaterial3D.new()
+	cloud_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	cloud_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	cloud_mat.albedo_color = Color(1, 1, 1, 0.82).lerp(Color(str(level["sky_horizon"])), 0.25)
+	var rng := RandomNumberGenerator.new()
+	rng.seed = int(level["seed"])
 	for i in range(9):
-		_add_rock(Vector3(7.4 + float(i % 2) * 2.4, 0.25, -float(i) * 4.0 - 1.0), Vector3(1.0, 0.7, 1.3), Color(0.39, 0.44, 0.42))
+		var cloud := Node3D.new()
+		for j in range(4):
+			var puff := PropFactory.part(PropFactory.sphere(1.0, 12), cloud_mat, Vector3(float(j) * 9.0 - 14.0, rng.randf_range(-1.0, 1.5), rng.randf_range(-3.0, 3.0)), Vector3(12.0 + rng.randf() * 6.0, 3.5 + rng.randf() * 2.0, 8.0))
+			puff.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+			cloud.add_child(puff)
+		cloud.position = Vector3(rng.randf_range(-150, 150), rng.randf_range(70, 110), rng.randf_range(-260, -20))
+		level_root.add_child(cloud)
+		clouds.append(cloud.get_child(0) as MeshInstance3D)
+		cloud.set_meta("speed", rng.randf_range(0.6, 1.6))
+		cloud.name = "Cloud%d" % i
 
-func _add_ancient_ruins() -> void:
-	var stone_color := Color(0.62, 0.53, 0.39)
+func _apply_quality() -> void:
+	var q := GameState.quality
+	var modes := [Viewport.MSAA_DISABLED, Viewport.MSAA_2X, Viewport.MSAA_4X]
+	get_viewport().msaa_3d = modes[q]
+	if sun:
+		sun.shadow_enabled = GameState.shadows
+	if world_env:
+		world_env.environment.glow_enabled = q >= 1
+	var fractions := [0.35, 0.7, 1.0]
+	for inst in grass_instances:
+		var total := inst.multimesh.instance_count
+		inst.multimesh.visible_instance_count = int(float(total) * fractions[q])
+
+# ---------- ground ----------
+
+func _build_ground() -> void:
+	var mesh := terrain.build_terrain(2.0)
+	var body := StaticBody3D.new()
+	body.name = "Terrain"
+	var mi := MeshInstance3D.new()
+	mi.mesh = mesh
+	mi.material_override = terrain.terrain_material()
+	body.add_child(mi)
+	var col := CollisionShape3D.new()
+	var shp := mesh.create_trimesh_shape()
+	shp.backface_collision = true
+	col.shape = shp
+	body.add_child(col)
+	level_root.add_child(body)
+	var river := terrain.build_river()
+	if river:
+		level_root.add_child(river)
+	# invisible side / end walls
+	var half := float(level["valley_half"]) + 15.0 + float(level.get("path_sway", 2.0)) * 1.8
+	var length := float(level["length"])
+	var wall_body := StaticBody3D.new()
+	wall_body.name = "Bounds"
 	for side in [-1.0, 1.0]:
-		var pillar := MeshInstance3D.new()
-		var mesh := BoxMesh.new()
-		mesh.size = Vector3(0.65, 3.3, 0.7)
-		pillar.mesh = mesh
-		pillar.position = Vector3(side * 3.0, 1.65, -26.0)
-		pillar.material_override = _material(stone_color, 0.96)
-		add_child(pillar)
-		var capital := MeshInstance3D.new()
-		var cap_mesh := BoxMesh.new()
-		cap_mesh.size = Vector3(0.95, 0.28, 0.95)
-		capital.mesh = cap_mesh
-		capital.position = Vector3(side * 3.0, 3.35, -26.0)
-		capital.material_override = _material(Color(0.76, 0.65, 0.46), 0.9)
-		add_child(capital)
-	var lintel := MeshInstance3D.new()
-	var lintel_mesh := BoxMesh.new()
-	lintel_mesh.size = Vector3(6.7, 0.7, 0.9)
-	lintel.mesh = lintel_mesh
-	lintel.position = Vector3(0, 3.65, -26.0)
-	lintel.material_override = _material(stone_color, 0.95)
-	add_child(lintel)
-	var emblem := MeshInstance3D.new()
-	var emblem_mesh := TorusMesh.new()
-	emblem_mesh.inner_radius = 0.42
-	emblem_mesh.outer_radius = 0.62
-	emblem.mesh = emblem_mesh
-	emblem.position = Vector3(0, 3.65, -25.48)
-	emblem.material_override = _material(Color(0.82, 0.61, 0.28), 0.55)
-	add_child(emblem)
+		var ws := CollisionShape3D.new()
+		var bx := BoxShape3D.new()
+		bx.size = Vector3(2.0, 200.0, length + 80.0)
+		ws.shape = bx
+		ws.position = Vector3(side * (half + 1.0), 40.0, -length * 0.5 + 8.0)
+		wall_body.add_child(ws)
+	for zpos in [terrain.z_max - 2.0, -length - 22.0]:
+		var wz := CollisionShape3D.new()
+		var bz := BoxShape3D.new()
+		bz.size = Vector3(half * 2.0 + 10.0, 200.0, 2.0)
+		wz.shape = bz
+		wz.position = Vector3(0, 40.0, zpos)
+		wall_body.add_child(wz)
+	level_root.add_child(wall_body)
 
-func _add_brazier() -> void:
-	var base := MeshInstance3D.new()
-	var base_mesh := CylinderMesh.new()
-	base_mesh.top_radius = 0.38
-	base_mesh.bottom_radius = 0.52
-	base_mesh.height = 0.65
-	base.mesh = base_mesh
-	base.position = Vector3(-3.6, 0.32, -18.0)
-	base.material_override = _material(Color(0.36, 0.31, 0.27), 0.8)
-	add_child(base)
-	var flame := MeshInstance3D.new()
-	var flame_mesh := SphereMesh.new()
-	flame_mesh.radius = 0.24
-	flame_mesh.height = 0.75
-	flame.mesh = flame_mesh
-	flame.position = Vector3(-3.6, 0.95, -18.0)
-	flame.scale = Vector3(0.7, 1.4, 0.7)
-	var flame_mat := StandardMaterial3D.new()
-	flame_mat.albedo_color = Color(1.0, 0.43, 0.12)
-	flame_mat.emission_enabled = true
-	flame_mat.emission = Color(1.0, 0.22, 0.035)
-	flame_mat.emission_energy_multiplier = 2.0
-	flame.material_override = flame_mat
-	add_child(flame)
-	var light := OmniLight3D.new()
-	light.position = Vector3(-3.6, 1.2, -18.0)
-	light.light_color = Color(1.0, 0.42, 0.13)
-	light.light_energy = 1.3
-	light.omni_range = 5.0
-	add_child(light)
+func _build_vegetation() -> void:
+	var tree_count := int(level["trees"])
+	if tree_count > 0:
+		var pts := terrain.scatter_points(tree_count, 5.0, float(level["valley_half"]) + 22.0)
+		var trees := terrain.build_multimesh(terrain.make_pine_mesh(), terrain.solid_vertex_material(0.95), pts, 0.85, 1.7)
+		level_root.add_child(trees)
+		var tb := StaticBody3D.new()
+		for p in pts:
+			var cs := CollisionShape3D.new()
+			var cyl := CylinderShape3D.new()
+			cyl.radius = 0.3
+			cyl.height = 3.0
+			cs.shape = cyl
+			cs.position = p + Vector3(0, 1.5, 0)
+			tb.add_child(cs)
+		level_root.add_child(tb)
+	var rock_count := int(level["rocks"])
+	if rock_count > 0:
+		for variant in range(3):
+			var rp := terrain.scatter_points(rock_count / 3, 3.0, float(level["valley_half"]) + 20.0, false)
+			var rmat := terrain.solid_vertex_material(1.0)
+			rmat.albedo_color = Color(str(level["rock"])).lightened(0.05 * float(variant))
+			var rocks := terrain.build_multimesh(terrain.make_rock_mesh(variant), rmat, rp, 0.8, 3.2)
+			level_root.add_child(rocks)
+			var rb := StaticBody3D.new()
+			for p in rp:
+				var cs := CollisionShape3D.new()
+				var sph := SphereShape3D.new()
+				sph.radius = 0.7
+				cs.shape = sph
+				cs.position = p + Vector3(0, 0.3, 0)
+				rb.add_child(cs)
+			level_root.add_child(rb)
+	var grass_count := int(level["grass_count"])
+	if grass_count > 0:
+		var gp := terrain.scatter_points(grass_count, 1.6, float(level["valley_half"]) + 6.0)
+		var grass := terrain.build_multimesh(terrain.make_grass_mesh(), terrain.foliage_material(), gp, 0.6, 1.25)
+		grass.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		level_root.add_child(grass)
+		grass_instances.append(grass)
+	var flower_count := int(level["flowers"])
+	if flower_count > 0:
+		var colors := [Color("#f2f2f2"), Color("#e8559a"), Color("#f0c43a"), Color("#8f6ae0")]
+		for ci in range(colors.size()):
+			var fp := terrain.scatter_points(flower_count / colors.size(), 1.8, float(level["valley_half"]) + 4.0)
+			var fl := terrain.build_multimesh(terrain.make_flower_mesh(colors[ci]), terrain.foliage_material(), fp, 0.9, 1.5)
+			fl.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+			level_root.add_child(fl)
+			grass_instances.append(fl)
 
-func _add_rock(at: Vector3, dimensions: Vector3, tint: Color) -> void:
-	var rock := MeshInstance3D.new()
-	var mesh := SphereMesh.new()
-	mesh.radial_segments = 7
-	mesh.rings = 4
-	rock.mesh = mesh
-	rock.position = at
-	rock.scale = dimensions * 0.5
-	rock.rotation = Vector3(0.12, at.x * 0.13, 0.08)
-	rock.material_override = _material(tint, 1.0)
-	add_child(rock)
+func _build_decor() -> void:
+	if bool(level.get("hall", false)):
+		for i in range(8):
+			for side in [-1.0, 1.0]:
+				var col := PropFactory.make_column()
+				col.position = Vector3(side * 12.0, terrain.height(side * 12.0, 8.0 - float(i) * 8.0), 8.0 - float(i) * 8.0)
+				level_root.add_child(col)
+				var cb := StaticBody3D.new()
+				var cs := CollisionShape3D.new()
+				var cyl := CylinderShape3D.new()
+				cyl.radius = 1.0
+				cyl.height = 10.0
+				cs.shape = cyl
+				cb.position = col.position + Vector3(0, 5.0, 0)
+				cb.add_child(cs)
+				level_root.add_child(cb)
+		for i in range(4):
+			var lamp := PropFactory.make_brazier(Color("#ffb347"))
+			lamp.position = Vector3(0, 0.0, 2.0 - float(i) * 16.0) + Vector3(0, terrain.height(0, 2.0 - float(i) * 16.0), 0)
+			lamp.add_child(PropFactory.make_flame(Color("#ff9a3c")))
+			level_root.add_child(lamp)
+	if bool(level.get("tents", false)):
+		var tent_colors := [Color("#c8a15a"), Color("#a8483a"), Color("#d8c08a"), Color("#6c8f9a")]
+		for i in range(10):
+			var z := -112.0 - float(i % 5) * 6.0
+			var x := terrain.path_x(z) + (-10.0 if i % 2 == 0 else 10.0) + float(i % 3) * 2.0
+			var tent := PropFactory.make_tent(tent_colors[i % tent_colors.size()])
+			tent.position = Vector3(x, terrain.height(x, z), z)
+			tent.rotation.y = float(i) * 0.7
+			level_root.add_child(tent)
+	if level.has("chain"):
+		_build_platform_chain()
+	if level.has("nest"):
+		var n: Vector2 = level["nest"]
+		var nest := PropFactory.make_nest()
+		nest.position = Vector3(n.x, terrain.height(n.x, n.y), n.y)
+		level_root.add_child(nest)
 
-func _add_tree(at: Vector3, tree_scale: float) -> void:
-	var trunk := MeshInstance3D.new()
-	var trunk_mesh := CylinderMesh.new()
-	trunk_mesh.top_radius = 0.12
-	trunk_mesh.bottom_radius = 0.2
-	trunk_mesh.height = 1.7
-	trunk.mesh = trunk_mesh
-	trunk.position = at + Vector3(0, 0.85, 0)
-	trunk.scale = Vector3.ONE * tree_scale
-	trunk.material_override = _material(Color(0.29, 0.19, 0.12), 1.0)
-	add_child(trunk)
-	for tier in range(3):
-		var crown := MeshInstance3D.new()
-		var crown_mesh := CylinderMesh.new()
-		crown_mesh.top_radius = 0.0
-		crown_mesh.bottom_radius = 0.95 - float(tier) * 0.16
-		crown_mesh.height = 1.65
-		crown_mesh.radial_segments = 7
-		crown.mesh = crown_mesh
-		crown.position = at + Vector3(0, 1.35 + float(tier) * 0.67, 0)
-		crown.scale = Vector3.ONE * tree_scale
-		crown.material_override = _material(Color(0.13 + float(tier) * 0.025, 0.28 + float(tier) * 0.025, 0.20), 1.0)
-		add_child(crown)
+func chain_position(i: int) -> Vector3:
+	var ch: Dictionary = level["chain"]
+	var count := int(ch["count"])
+	var t := float(i) / float(maxi(count - 1, 1))
+	var z := lerpf(float(ch["z0"]), float(ch["z1"]), t)
+	var x := terrain.path_x(z) + sin(float(i) * 1.4) * float(ch["sway"])
+	var z_start := float(ch["z0"]) + 3.0
+	var y0 := terrain.height(terrain.path_x(z_start), z_start)
+	return Vector3(x, y0 + 0.1 + float(i) * float(ch["rise"]), z)
 
-func _build_player_art() -> void:
-	var old_mesh := player.get_node_or_null("BodyMesh")
-	if old_mesh:
-		old_mesh.queue_free()
-	player_art = Node3D.new()
-	player_art.name = "ZalCharacter"
-	player.add_child(player_art)
-	var robe := _make_mesh(CapsuleMesh.new(), Vector3(0, 0.72, 0), Vector3(0.72, 0.95, 0.58), Color(0.49, 0.24, 0.15))
-	robe.name = "TravelRobe"
-	player_art.add_child(robe)
-	var head := _make_mesh(SphereMesh.new(), Vector3(0, 1.55, 0), Vector3(0.42, 0.46, 0.42), Color(0.72, 0.53, 0.38))
-	player_art.add_child(head)
-	var hair := _make_mesh(SphereMesh.new(), Vector3(0, 1.78, -0.06), Vector3(0.46, 0.34, 0.46), Color(0.88, 0.87, 0.78))
-	player_art.add_child(hair)
-	var sash := _make_mesh(CylinderMesh.new(), Vector3(0, 0.91, 0), Vector3(0.76, 0.13, 0.62), Color(0.78, 0.58, 0.24))
-	player_art.add_child(sash)
-	player_left_arm = _make_mesh(CapsuleMesh.new(), Vector3(-0.42, 0.94, 0), Vector3(0.18, 0.64, 0.18), Color(0.58, 0.31, 0.19))
-	player_art.add_child(player_left_arm)
-	player_right_arm = _make_mesh(CapsuleMesh.new(), Vector3(0.42, 0.94, 0), Vector3(0.18, 0.64, 0.18), Color(0.58, 0.31, 0.19))
-	player_art.add_child(player_right_arm)
-	for side in [-1.0, 1.0]:
-		var leg := _make_mesh(CapsuleMesh.new(), Vector3(side * 0.18, 0.25, 0), Vector3(0.2, 0.55, 0.2), Color(0.22, 0.24, 0.25))
-		player_art.add_child(leg)
+func _build_platform_chain() -> void:
+	var ch: Dictionary = level["chain"]
+	var stone := PropFactory.mat(Color("#5f574c"), 1.0)
+	var moss := PropFactory.mat(Color("#6fae3f"), 1.0)
+	var body := StaticBody3D.new()
+	body.name = "StonePlatforms"
+	level_root.add_child(body)
+	for i in range(int(ch["count"])):
+		var p := chain_position(i)
+		var holder := Node3D.new()
+		holder.position = p
+		holder.rotation.y = sin(float(i) * 2.1) * 0.5
+		holder.add_child(PropFactory.part(PropFactory.box(Vector3(3.4, 1.4, 3.4)), stone, Vector3(0, -0.7, 0)))
+		holder.add_child(PropFactory.part(PropFactory.box(Vector3(3.5, 0.12, 3.5)), moss, Vector3(0, -0.04, 0)))
+		holder.add_child(PropFactory.part(PropFactory.cylinder(0.9, 0.2, 6.0, 7), stone, Vector3(0, -4.4, 0)))
+		level_root.add_child(holder)
+		var cs := CollisionShape3D.new()
+		var bx := BoxShape3D.new()
+		bx.size = Vector3(3.4, 1.4, 3.4)
+		cs.shape = bx
+		cs.position = p + Vector3(0, -0.7, 0)
+		cs.rotation.y = holder.rotation.y
+		body.add_child(cs)
 
-func _build_simorgh() -> void:
-	simorgh_root = Node3D.new()
-	simorgh_root.name = "Simorgh"
-	simorgh_root.position = Vector3(0, 7.4, -28.0)
-	add_child(simorgh_root)
-	var body := _make_mesh(SphereMesh.new(), Vector3.ZERO, Vector3(1.3, 0.62, 0.7), Color(0.74, 0.56, 0.28))
-	simorgh_root.add_child(body)
-	var head := _make_mesh(SphereMesh.new(), Vector3(0, 0.25, -0.85), Vector3(0.44, 0.42, 0.44), Color(0.88, 0.78, 0.55))
-	simorgh_root.add_child(head)
-	var crest_mesh := CylinderMesh.new()
-	crest_mesh.top_radius = 0.0
-	crest_mesh.bottom_radius = 0.22
-	crest_mesh.height = 0.75
-	var crest := _make_mesh(crest_mesh, Vector3(0, 0.65, -0.86), Vector3.ONE, Color(0.72, 0.22, 0.15))
-	simorgh_root.add_child(crest)
-	for side in [-1.0, 1.0]:
-		var wing := _make_mesh(SphereMesh.new(), Vector3(side * 1.05, 0.05, 0.12), Vector3(1.5, 0.16, 0.55), Color(0.55, 0.25, 0.17))
-		wing.rotation.z = side * -0.18
-		simorgh_root.add_child(wing)
-		simorgh_wings.append(wing)
-		for feather in range(4):
-			var plume := _make_mesh(CapsuleMesh.new(), Vector3(side * (1.15 + float(feather) * 0.25), -0.1, 0.42 + float(feather) * 0.13), Vector3(0.12, 0.78, 0.12), Color(0.84, 0.67, 0.38))
-			plume.rotation.z = side * -0.9
-			simorgh_root.add_child(plume)
-	var tail := _make_mesh(CapsuleMesh.new(), Vector3(0, -0.12, 0.95), Vector3(0.22, 1.25, 0.22), Color(0.68, 0.32, 0.18))
-	tail.rotation.x = -1.1
-	simorgh_root.add_child(tail)
+func _build_ambient_particles() -> void:
+	var p := CPUParticles3D.new()
+	p.amount = 70
+	p.lifetime = 7.0
+	p.preprocess = 7.0
+	p.emission_shape = CPUParticles3D.EMISSION_SHAPE_BOX
+	p.emission_box_extents = Vector3(22, 6, 22)
+	p.direction = Vector3(1, 0.2, 0.3)
+	p.spread = 60.0
+	p.initial_velocity_min = 0.2
+	p.initial_velocity_max = 0.7
+	p.gravity = Vector3(0, -0.02, 0)
+	var qm := QuadMesh.new()
+	qm.size = Vector2(0.07, 0.07)
+	var m := StandardMaterial3D.new()
+	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	m.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
+	m.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+	m.albedo_color = Color(1.0, 0.95, 0.75, 0.7)
+	p.mesh = qm
+	p.material_override = m
+	p.position = Vector3(0, 3.0, 0)
+	player.add_child(p)
+	p.name = "Motes"
+	if player.has_node("Motes_old"):
+		player.get_node("Motes_old").queue_free()
 
-func _make_mesh(mesh: Mesh, at: Vector3, mesh_scale: Vector3, tint: Color) -> MeshInstance3D:
-	var instance := MeshInstance3D.new()
-	instance.mesh = mesh
-	instance.position = at
-	instance.scale = mesh_scale
-	instance.material_override = _material(tint, 0.82)
-	return instance
+# ---------- interactables ----------
 
-func _material(tint: Color, roughness: float = 0.9) -> StandardMaterial3D:
-	var mat := StandardMaterial3D.new()
-	mat.albedo_color = tint
-	mat.roughness = roughness
-	return mat
+func _ground_pos(offset_pos: Vector2) -> Vector3:
+	var z := offset_pos.y
+	var x := terrain.path_x(z) + offset_pos.x
+	if level.has("nest") and not (bool(level.get("hall", false))):
+		x = offset_pos.x
+	return Vector3(x, terrain.height(x, z), z)
 
-func _spawn_clues() -> void:
-	for clue_data in CLUES:
-		var marker := Node3D.new()
-		marker.name = str(clue_data.id)
-		marker.position = clue_data.position
-		marker.set_meta("clue_id", clue_data.id)
-		marker.set_meta("clue_title", clue_data.title)
-		marker.set_meta("clue_hint", clue_data.hint)
-		add_child(marker)
-		var ring := MeshInstance3D.new()
-		var ring_mesh := TorusMesh.new()
-		ring_mesh.inner_radius = 0.25
-		ring_mesh.outer_radius = 0.34
-		ring.mesh = ring_mesh
-		ring.rotation.x = 1.1
-		ring.material_override = _material(Color(0.95, 0.7, 0.28), 0.35)
-		marker.add_child(ring)
-		var glow := MeshInstance3D.new()
-		var sphere := SphereMesh.new()
-		sphere.radius = 0.13
-		sphere.height = 0.26
-		glow.mesh = sphere
-		glow.position.y = 0.25
-		glow.material_override = _material(Color(1.0, 0.84, 0.48), 0.3)
-		marker.add_child(glow)
-		var light := OmniLight3D.new()
-		light.light_color = Color(1.0, 0.68, 0.28)
-		light.light_energy = 0.85
-		light.omni_range = 3.5
-		marker.add_child(light)
-		clue_nodes.append(marker)
+func _build_interactables() -> void:
+	for d in level["interactables"]:
+		var data: Dictionary = d
+		var pos: Vector3
+		if data.has("on_chain"):
+			pos = chain_position(int(data["on_chain"])) + Vector3(0, 1.1, 0)
+		else:
+			pos = _ground_pos(data["pos"])
+		var node: Node3D
+		match str(data["kind"]):
+			"clue":
+				node = PropFactory.make_clue_marker("banner" if str(data["id"]).begins_with("banner") else "clue")
+				if not str(data["id"]).begins_with("banner"):
+					pos += Vector3(0, 0.9, 0)
+			"brazier":
+				node = PropFactory.make_brazier(Color(str(data["color"])))
+			"quiz":
+				node = PropFactory.make_pedestal()
+			"npc":
+				match str(data["id"]):
+					"simorgh":
+						node = PropFactory.make_simorgh()
+						node.scale = Vector3.ONE * 1.5
+						pos += Vector3(0, 3.4, 0)
+						simorgh = node
+					"sam":
+						node = PropFactory.make_figure(Color("#6d3b2e"), Color("#cfcfcf"), true)
+					"mobed":
+						node = PropFactory.make_figure(Color("#e6dfcf"), Color("#d8d4c8"), true)
+					_:
+						node = PropFactory.make_stone_tablet()
+		node.position = pos
+		level_root.add_child(node)
+		if str(data["kind"]) == "npc" and str(data["id"]) in ["sam", "mobed"]:
+			node.look_at(Vector3(pos.x, pos.y, pos.z + 10.0))
+		items.append({"data": data, "node": node, "done": false, "base_y": pos.y})
 
-func _interact_nearest() -> void:
-	if mission_complete:
-		hud.show_message("این بخش از ماجراجویی را کامل کرده‌ای. روایت زال و سیمرغ را در دانشنامه بخوان.")
-		return
-	var nearest: Node3D
-	var nearest_distance := 3.2
-	for marker in clue_nodes:
-		if not is_instance_valid(marker) or found_clues.has(str(marker.get_meta("clue_id"))):
+func _non_finale_items() -> Array[Dictionary]:
+	var out: Array[Dictionary] = []
+	for it in items:
+		if not bool((it["data"] as Dictionary).get("finale", false)):
+			out.append(it)
+	return out
+
+func _required_done() -> bool:
+	for it in _non_finale_items():
+		if not bool(it["done"]):
+			return false
+	return true
+
+func _refresh_progress() -> void:
+	var req := _non_finale_items()
+	var done_count := 0
+	for it in req:
+		if bool(it["done"]):
+			done_count += 1
+	hud.set_progress(str(level["progress_label"]), done_count, req.size())
+
+func _nearest_item() -> Dictionary:
+	var best: Dictionary = {}
+	var best_d := INTERACT_RADIUS
+	for it in items:
+		if bool(it["done"]) and str((it["data"] as Dictionary)["kind"]) != "brazier":
 			continue
-		var distance := player.global_position.distance_to(marker.global_position)
-		if distance < nearest_distance:
-			nearest_distance = distance
-			nearest = marker
-	if nearest == null:
-		hud.show_message("به یکی از نشانه‌های زرین نزدیک شو و دکمه تعامل را بزن.")
-		return
-	var clue_id := str(nearest.get_meta("clue_id"))
-	hud.show_message(str(nearest.get_meta("clue_hint")))
-	found_clues.append(clue_id)
-	nearest.queue_free()
-	hud.set_progress(found_clues.size(), clues_required)
-	hud.set_mission("ردّ آشیانه", "نشانه‌های پیدا شده: %d از %d" % [found_clues.size(), clues_required])
-	if found_clues.size() == clues_required:
-		_complete_mission()
+		var node: Node3D = it["node"]
+		if not is_instance_valid(node):
+			continue
+		var a := player.global_position
+		var b := node.global_position
+		var dist := Vector2(a.x - b.x, a.z - b.z).length()
+		if dist < best_d and absf(a.y - b.y) < 7.0:
+			best_d = dist
+			best = it
+	return best
 
-func _complete_mission() -> void:
-	mission_complete = true
-	hud.set_mission("نشانه‌ها پیدا شدند", "اکنون روایت را در دانشنامه بخوان.")
-	hud.show_message("هر سه نشانه را پیدا کردی. در روایت شاهنامه، سیمرغ زال را در البرز می‌یابد و پرورش می‌دهد؛ این داستان حماسی و اسطوره‌ای است.")
-	hud.show_knowledge()
+func _interact() -> void:
+	if not level_active or hud.is_modal_open():
+		return
+	var it := _nearest_item()
+	if it.is_empty():
+		hud.toast("به یکی از نشانه‌های درخشان نزدیک شو و دکمه «تعامل» را بزن.", 3.0)
+		return
+	var d: Dictionary = it["data"]
+	match str(d["kind"]):
+		"clue":
+			_collect(it)
+			hud.toast(str(d["hint"]), 4.0)
+			_check_finish()
+		"brazier":
+			_use_brazier(it)
+		"quiz":
+			hud.show_quiz(d, func(correct: bool, finished_q: bool) -> void:
+				if not correct:
+					mistakes += 1
+				if finished_q:
+					_mark_done(it)
+					_set_pedestal_done(it)
+					_check_finish())
+		"npc":
+			if bool(d.get("finale", false)) and not _required_done():
+				hud.toast(str(d["hint"]), 3.5)
+				return
+			hud.show_dialogue(str(d["speaker"]), d["lines"], d.get("choices", []), d.get("after", []), func() -> void:
+				_mark_done(it)
+				_finish_level())
+
+func _collect(it: Dictionary) -> void:
+	var node: Node3D = it["node"]
+	if is_instance_valid(node):
+		var burst := PropFactory.make_burst()
+		burst.position = node.global_position
+		level_root.add_child(burst)
+		get_tree().create_timer(2.0).timeout.connect(burst.queue_free)
+		node.queue_free()
+	_mark_done(it)
+
+func _mark_done(it: Dictionary) -> void:
+	it["done"] = true
+	_refresh_progress()
+
+func _set_pedestal_done(it: Dictionary) -> void:
+	var node: Node3D = it["node"]
+	if is_instance_valid(node):
+		var burst := PropFactory.make_burst(Color("#8fe39a"))
+		burst.position = node.global_position + Vector3(0, 1.6, 0)
+		level_root.add_child(burst)
+		get_tree().create_timer(2.0).timeout.connect(burst.queue_free)
+
+func _use_brazier(it: Dictionary) -> void:
+	var d: Dictionary = it["data"]
+	if bool(it["done"]):
+		hud.toast("این آتش پیش‌تر روشن شده است.", 2.0)
+		return
+	if int(d["order"]) == brazier_next:
+		brazier_next += 1
+		_mark_done(it)
+		var node: Node3D = it["node"]
+		var flame := PropFactory.make_flame(Color(str(d["color"])))
+		node.add_child(flame)
+		hud.toast("%s روشن شد." % str(d["title"]), 2.5)
+		_check_finish()
+	else:
+		mistakes += 1
+		brazier_next = 0
+		for other in items:
+			if str((other["data"] as Dictionary)["kind"]) == "brazier":
+				other["done"] = false
+				var n: Node3D = other["node"]
+				var fl := n.get_node_or_null("Flame")
+				if fl:
+					fl.queue_free()
+		_refresh_progress()
+		hud.toast("ترتیب درست نبود؛ آتش‌ها خاموش شدند. سرخ، آبی، زرد، سبز.", 4.0)
+
+func _check_finish() -> void:
+	if finished:
+		return
+	if _required_done():
+		var has_finale := false
+		for it in items:
+			if bool((it["data"] as Dictionary).get("finale", false)):
+				has_finale = true
+		if has_finale:
+			hud.set_objective("اکنون به سراغ «%s» برو و با او سخن بگو." % _finale_title())
+			hud.toast("همه‌ی بخش‌ها کامل شد. به سراغ «%s» برو." % _finale_title(), 5.0)
+		else:
+			_finish_level()
+
+func _finale_title() -> String:
+	for it in items:
+		var d: Dictionary = it["data"]
+		if bool(d.get("finale", false)):
+			return str(d["title"])
+	return ""
+
+func _finish_level() -> void:
+	if finished:
+		return
+	finished = true
+	var stars := 3 if mistakes == 0 else (2 if mistakes <= 2 else 1)
+	var k: Dictionary = level["knowledge"]
+	GameState.complete_level(level_index, stars, str(k["id"]))
+	var has_next := level_index + 1 < LevelData.LEVELS.size()
+	hud.show_level_complete(level, stars, has_next, func() -> void: load_level(level_index + 1))
+
+# ---------- per-frame ----------
+
+func _process(delta: float) -> void:
+	if not level_active:
+		return
+	var t := Time.get_ticks_msec() * 0.001
+	var moving := Vector2(player.velocity.x, player.velocity.z).length() > 0.5 and player.is_on_floor()
+	PropFactory.animate_zal(player.art, moving, t)
+	if player.global_position.y < kill_y:
+		_respawn()
+	var near := _nearest_item()
+	hud.set_interact_ready(not near.is_empty())
+	for it in items:
+		var node: Node3D = it["node"]
+		if not is_instance_valid(node):
+			continue
+		var kind := str((it["data"] as Dictionary)["kind"])
+		if kind == "clue" and not str((it["data"] as Dictionary)["id"]).begins_with("banner"):
+			var ring := node.get_node_or_null("Ring")
+			if ring:
+				(ring as Node3D).rotation.y = t * 1.6
+				(ring as Node3D).rotation.x = 1.1
+			node.position.y = float(it["base_y"]) + sin(t * 2.0 + node.position.x) * 0.12
+	if simorgh:
+		simorgh.position.y = float(items[_simorgh_index()]["base_y"]) + sin(t * 1.1) * 0.35
+		PropFactory.animate_simorgh(simorgh, t)
+		simorgh.look_at(Vector3(player.global_position.x, simorgh.global_position.y, player.global_position.z), Vector3.UP, true)
+	for c in clouds:
+		var parent := c.get_parent() as Node3D
+		parent.position.x += float(parent.get_meta("speed")) * delta
+		if parent.position.x > 200.0:
+			parent.position.x = -200.0
+
+func _simorgh_index() -> int:
+	for i in range(items.size()):
+		if (items[i]["data"] as Dictionary)["id"] == "simorgh":
+			return i
+	return 0
+
+func _respawn() -> void:
+	player.global_position = checkpoint
+	player.velocity = Vector3.ZERO
+	hud.toast("از لبه افتادی؛ دوباره تلاش کن.", 3.0)
+
+# ---------- self test (CI) ----------
+
+func _run_selftest() -> void:
+	var failures := 0
+	for i in range(LevelData.LEVELS.size()):
+		load_level(i, false)
+		await get_tree().process_frame
+		await get_tree().physics_frame
+		for it in items:
+			if not bool((it["data"] as Dictionary).get("finale", false)):
+				it["done"] = true
+		if not _required_done():
+			failures += 1
+		# exercise every UI path once
+		for it in items:
+			var d: Dictionary = it["data"]
+			match str(d["kind"]):
+				"quiz":
+					hud.show_quiz(d, func(_a: bool, _b: bool) -> void: pass)
+					hud.close_all_modals()
+				"npc":
+					hud.show_dialogue(str(d["speaker"]), d["lines"], d.get("choices", []), d.get("after", []), func() -> void: pass)
+					hud.close_all_modals()
+		await get_tree().create_timer(0.3).timeout
+		# the player must stand on the terrain after a short settle
+		for _f in range(40):
+			await get_tree().physics_frame
+		var standing := player.is_on_floor()
+		print("level %d (%s): items=%d on_floor=%s y=%.2f" % [i, level["id"], items.size(), standing, player.global_position.y])
+		if not standing:
+			failures += 1
+		_finish_level()
+		hud.close_all_modals()
+		finished = false
+	hud.show_main_menu()
+	hud.close_all_modals()
+	hud.show_pause_menu()
+	hud.close_all_modals()
+	hud.show_knowledge_list()
+	hud.close_all_modals()
+	print("SELFTEST ", "OK" if failures == 0 else "FAILED (%d)" % failures)
+	get_tree().quit(0 if failures == 0 else 1)

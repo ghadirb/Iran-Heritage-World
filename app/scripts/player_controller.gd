@@ -1,74 +1,122 @@
 extends CharacterBody3D
 class_name PlayerController
+## Third-person character. Moves relative to the camera; driven by the virtual
+## stick (GameState.move_vector) or the keyboard. The camera rig is a top-level
+## node so rotating the character never rotates the camera.
 
-@export var move_speed: float = 5.0
-@export var acceleration: float = 18.0
-@export var jump_velocity: float = 4.5
-@export var rotation_speed: float = 10.0
-@export var touch_look_sensitivity: float = 0.006
-@export var minimum_camera_pitch: float = -0.85
-@export var maximum_camera_pitch: float = -0.08
+signal jumped
 
-@onready var camera_pivot: Node3D = $CameraPivot
+@export var run_speed: float = 6.2
+@export var acceleration: float = 28.0
+@export var jump_velocity: float = 8.0
+@export var turn_speed: float = 12.0
+@export var look_sensitivity: float = 0.0055
+@export var min_pitch: float = -1.1
+@export var max_pitch: float = 0.15
 
+var rig: Node3D
+var spring: SpringArm3D
+var camera: Camera3D
+var art: Node3D
+var yaw := 0.0
+var pitch := -0.32
+var coyote := 0.0
+var jump_buffer := 0.0
+var input_enabled := true
 var gravity: float = ProjectSettings.get_setting("physics/3d/default_gravity")
 
 func _ready() -> void:
-	_register_input_actions()
+	floor_snap_length = 0.6
+	floor_max_angle = deg_to_rad(56.0)
+	safe_margin = 0.03
+	_register_keys()
+	rig = Node3D.new()
+	rig.name = "CameraRig"
+	rig.top_level = true
+	add_child(rig)
+	spring = SpringArm3D.new()
+	spring.spring_length = 6.4
+	spring.margin = 0.3
+	spring.shape = SphereShape3D.new()
+	(spring.shape as SphereShape3D).radius = 0.3
+	spring.add_excluded_object(get_rid())
+	rig.add_child(spring)
+	camera = Camera3D.new()
+	camera.fov = 68.0
+	camera.near = 0.1
+	camera.far = 400.0
+	camera.current = true
+	spring.add_child(camera)
+	rig.global_position = global_position + Vector3(0, 1.5, 0)
 
-func _unhandled_input(event: InputEvent) -> void:
-	# The left side of the screen is reserved for movement buttons.
-	# Dragging on the right side rotates the third-person camera.
-	if event is InputEventScreenDrag:
-		var screen_width := get_viewport_rect().size.x
-		if event.position.x >= screen_width * 0.38:
-			camera_pivot.rotation.y -= event.relative.x * touch_look_sensitivity
-			camera_pivot.rotation.x = clampf(
-				camera_pivot.rotation.x - event.relative.y * touch_look_sensitivity,
-				minimum_camera_pitch,
-				maximum_camera_pitch
-			)
+func add_look(relative: Vector2) -> void:
+	yaw -= relative.x * look_sensitivity
+	pitch = clampf(pitch - relative.y * look_sensitivity, min_pitch, max_pitch)
+
+func request_jump() -> void:
+	jump_buffer = 0.15
+
+func snap_camera_behind(face_yaw: float = 0.0) -> void:
+	yaw = face_yaw
+	pitch = -0.3
+	if rig:
+		rig.global_position = global_position + Vector3(0, 1.5, 0)
+
+func _process(delta: float) -> void:
+	if rig == null:
+		return
+	var key_look := Input.get_axis("look_left", "look_right")
+	if input_enabled and key_look != 0.0:
+		yaw -= key_look * 2.0 * delta
+	rig.global_position = rig.global_position.lerp(global_position + Vector3(0, 1.5, 0), 1.0 - exp(-14.0 * delta))
+	rig.rotation = Vector3(pitch, yaw, 0.0)
 
 func _physics_process(delta: float) -> void:
-	var input_vector := Input.get_vector("move_left", "move_right", "move_forward", "move_back")
-	var camera := get_viewport().get_camera_3d()
-	var forward := Vector3.FORWARD
-	var right := Vector3.RIGHT
-	if camera:
-		forward = -camera.global_transform.basis.z
-		right = camera.global_transform.basis.x
-	forward.y = 0.0
-	right.y = 0.0
-	forward = forward.normalized()
-	right = right.normalized()
-	var direction := (right * input_vector.x + forward * -input_vector.y).normalized()
-
-	if direction.length_squared() > 0.001:
-		velocity.x = move_toward(velocity.x, direction.x * move_speed, acceleration * delta)
-		velocity.z = move_toward(velocity.z, direction.z * move_speed, acceleration * delta)
+	var input_vector := Vector2.ZERO
+	if input_enabled:
+		input_vector = Input.get_vector("move_left", "move_right", "move_forward", "move_back") + GameState.move_vector
+		if input_vector.length() > 1.0:
+			input_vector = input_vector.normalized()
+		if Input.is_action_just_pressed("jump"):
+			request_jump()
+	var forward := Vector3(-sin(yaw), 0.0, -cos(yaw))
+	var right := Vector3(cos(yaw), 0.0, -sin(yaw))
+	var direction := right * input_vector.x + forward * -input_vector.y
+	var target := direction * run_speed
+	velocity.x = move_toward(velocity.x, target.x, acceleration * delta)
+	velocity.z = move_toward(velocity.z, target.z, acceleration * delta)
+	if direction.length_squared() > 0.01 and art:
 		var target_angle := atan2(direction.x, direction.z)
-		rotation.y = lerp_angle(rotation.y, target_angle, rotation_speed * delta)
+		art.rotation.y = lerp_angle(art.rotation.y, target_angle, turn_speed * delta)
+
+	if is_on_floor():
+		coyote = 0.12
 	else:
-		velocity.x = move_toward(velocity.x, 0.0, acceleration * delta)
-		velocity.z = move_toward(velocity.z, 0.0, acceleration * delta)
-
-	if not is_on_floor():
+		coyote -= delta
 		velocity.y -= gravity * delta
-	elif Input.is_action_just_pressed("jump"):
+	jump_buffer -= delta
+	if jump_buffer > 0.0 and coyote > 0.0:
 		velocity.y = jump_velocity
-
+		jump_buffer = 0.0
+		coyote = 0.0
+		jumped.emit()
 	move_and_slide()
 
-func _register_input_actions() -> void:
-	_add_key_action("move_forward", KEY_W)
-	_add_key_action("move_back", KEY_S)
-	_add_key_action("move_left", KEY_A)
-	_add_key_action("move_right", KEY_D)
-	_add_key_action("jump", KEY_SPACE)
+func _register_keys() -> void:
+	_add_key("move_forward", [KEY_W, KEY_UP])
+	_add_key("move_back", [KEY_S, KEY_DOWN])
+	_add_key("move_left", [KEY_A, KEY_LEFT])
+	_add_key("move_right", [KEY_D, KEY_RIGHT])
+	_add_key("jump", [KEY_SPACE])
+	_add_key("interact", [KEY_E, KEY_ENTER])
+	_add_key("look_left", [KEY_Q])
+	_add_key("look_right", [KEY_R])
 
-func _add_key_action(action_name: StringName, key: Key) -> void:
-	if not InputMap.has_action(action_name):
-		InputMap.add_action(action_name)
-	var event := InputEventKey.new()
-	event.physical_keycode = key
-	InputMap.action_add_event(action_name, event)
+func _add_key(action_name: StringName, keys: Array) -> void:
+	if InputMap.has_action(action_name):
+		return
+	InputMap.add_action(action_name)
+	for key in keys:
+		var event := InputEventKey.new()
+		event.physical_keycode = key
+		InputMap.action_add_event(action_name, event)

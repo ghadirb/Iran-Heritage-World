@@ -27,3 +27,8 @@ jobs:
         run: godot --headless --editor --path app --quit
       - name: Parse and load main scene
         run: godot --headless --path app --quit
+      - name: Gameplay self-test (all levels, UI paths)
+        run: |
+          godot --headless --path app -- --selftest | tee selftest.log
+          grep -q "SELFTEST OK" selftest.log
+          ! grep -E "SCRIPT ERROR|Parse Error" selftest.log
