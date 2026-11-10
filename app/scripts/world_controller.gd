@@ -364,7 +364,7 @@ func chain_position(i: int) -> Vector3:
 	# Anchor the first stone to solid ground BEFORE the chasm, not to the
 	# terrain height inside the chasm (which is dozens of metres lower).
 	var z_start := float(ch["z0"]) + 5.0
-	var z_end := float(ch["z1"]) - 5.0
+	var z_end := float(ch["z1"])
 	var start_x := terrain.path_x(z_start)
 	var end_x := terrain.path_x(z_end)
 	var y_start := terrain.height(start_x, z_start) + 0.12
