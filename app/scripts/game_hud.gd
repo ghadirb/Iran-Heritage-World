@@ -55,7 +55,7 @@ func _build_interface() -> void:
 	root.add_child(message_label)
 
 	var help := Label.new()
-	help.text = "حرکت: WASD | تعامل: E"
+	help.text = "حرکت با دکمه‌ها | چرخش دوربین: کشیدن سمت راست صفحه | تعامل"
 	help.position = Vector2(24, 340)
 	help.add_theme_color_override("font_color", Color(0.94, 0.94, 0.94))
 	root.add_child(help)
