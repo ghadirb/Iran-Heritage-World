@@ -514,7 +514,7 @@ func show_audio_settings(back: Callable) -> void:
 		GameState.set_audio(GameState.music_volume, LEVEL_STEPS[ai[0]], GameState.voice_mode)
 		ab.text = "صدای طبیعت (باد و آب): " + LEVEL_NAMES[ai[0]])
 	box.add_child(ab)
-	var voice_names := ["روایت صوتی: خاموش", "روایت صوتی: با دکمه «شنیدن»", "روایت صوتی: خودکار"]
+	var voice_names := ["روایت صوتی: خاموش", "روایت صوتی: فقط با دکمه «شنیدن»", "روایت صوتی: خودکار (پیش‌فرض)"]
 	var vb := _button(voice_names[GameState.voice_mode], func() -> void: pass, Vector2(380, 54))
 	vb.pressed.connect(func() -> void:
 		GameState.set_audio(GameState.music_volume, GameState.ambience_volume, (GameState.voice_mode + 1) % 3)
