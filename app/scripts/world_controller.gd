@@ -167,8 +167,7 @@ func _interact_nearest() -> void:
 		return
 	var clue_id := str(nearest.get_meta("clue_id"))
 	found_clues.append(clue_id)
-	nearest.visible = false
-	var title := str(nearest.get_meta("clue_title"))
+	nearest.queue_free()
 	hud.show_message(str(nearest.get_meta("clue_hint")))
 	hud.set_mission("ردّ آشیانه", "نشانه‌های پیدا شده: %d از %d" % [found_clues.size(), clues_required])
 	if found_clues.size() == clues_required:
