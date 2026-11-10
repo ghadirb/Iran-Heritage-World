@@ -90,7 +90,9 @@ jobs:
 
       - name: Export debug APK
         run: |
-          mkdir -p build
+          # Godot resolves the preset export_path relative to the project directory (app/).
+          # Keep both locations available: the preset path and the CLI artifact path.
+          mkdir -p build app/build
           godot --headless --verbose --path app --export-debug "Android" build/IranHeritageWorld-debug.apk
           test -s build/IranHeritageWorld-debug.apk
 
