@@ -13,6 +13,9 @@ var stars: Dictionary = {}           # level index (String) -> 0..3
 var knowledge: Array = []            # ids of unlocked encyclopedia entries
 var quality := 0                     # 0 light, 1 medium, 2 high (weak-phone safe default)
 var shadows := false
+var ui_scale_index := 1              # 0 normal, 1 large, 2 extra large (text/buttons size)
+var ui_saved := false
+const UI_SCALES := [1.0, 1.25, 1.4]
 var quality_saved := false           # false on first run -> pick a safe default
 const GUARD_PATH := "user://loading.flag"
 var safe_mode_triggered := false
@@ -33,7 +36,23 @@ func _ready() -> void:
 		shadows = false
 		safe_mode_triggered = true
 		DirAccess.remove_absolute(ProjectSettings.globalize_path(GUARD_PATH))
+	if not ui_saved:
+		ui_scale_index = 1 if OS.has_feature("mobile") else 0
 	apply_engine_quality()
+	apply_ui_scale()
+
+func apply_ui_scale() -> void:
+	var win := get_window()
+	if win == null:
+		return
+	var f: float = UI_SCALES[ui_scale_index]
+	win.content_scale_size = Vector2i(roundi(1280.0 / f), roundi(720.0 / f))
+
+func set_ui_scale(value: int) -> void:
+	ui_scale_index = clampi(value, 0, 2)
+	ui_saved = true
+	apply_ui_scale()
+	save_game()
 
 func begin_loading_guard() -> void:
 	var f := FileAccess.open(GUARD_PATH, FileAccess.WRITE)
@@ -69,6 +88,8 @@ func load_game() -> void:
 	knowledge = data.get("knowledge", [])
 	quality = int(data.get("quality", 0))
 	quality_saved = data.has("quality")
+	ui_scale_index = clampi(int(data.get("ui_scale", 1)), 0, 2)
+	ui_saved = data.has("ui_scale")
 	shadows = bool(data.get("shadows", false))
 
 func save_game() -> void:
@@ -81,6 +102,7 @@ func save_game() -> void:
 		"knowledge": knowledge,
 		"quality": quality,
 		"shadows": shadows,
+		"ui_scale": ui_scale_index,
 	}))
 
 func complete_level(index: int, star_count: int, knowledge_id: String) -> void:

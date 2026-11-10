@@ -16,6 +16,7 @@ const GOLD := Color(0.86, 0.64, 0.28)
 const NIGHT := Color(0.07, 0.1, 0.13, 0.82)
 
 var root: Control
+var hud_cards: Control
 var touch: TouchControls
 var title_label: Label
 var subtitle_label: Label
@@ -127,6 +128,8 @@ func _build_hud() -> void:
 	left.add_theme_constant_override("separation", 8)
 	left.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	root.add_child(left)
+	hud_cards = left
+	left.visible = false
 
 	var card := PanelContainer.new()
 	card.add_theme_stylebox_override("panel", _style(NIGHT, 14))
@@ -177,6 +180,7 @@ func _build_hud() -> void:
 func set_level_info(title: String, subtitle: String) -> void:
 	title_label.text = title
 	subtitle_label.text = subtitle
+	hud_cards.visible = true
 
 func set_objective(text: String) -> void:
 	objective_label.text = text
@@ -358,6 +362,12 @@ func _add_quality_controls(box: VBoxContainer) -> void:
 		GameState.set_shadows(not GameState.shadows)
 		sb.text = "سایه‌ها: روشن" if GameState.shadows else "سایه‌ها: خاموش")
 	box.add_child(sb)
+	var ui_names := ["اندازه نوشته و دکمه‌ها: عادی", "اندازه نوشته و دکمه‌ها: بزرگ", "اندازه نوشته و دکمه‌ها: خیلی بزرگ"]
+	var ub := _button(ui_names[GameState.ui_scale_index], func() -> void: pass, Vector2(380, 54))
+	ub.pressed.connect(func() -> void:
+		GameState.set_ui_scale((GameState.ui_scale_index + 1) % 3)
+		ub.text = ui_names[GameState.ui_scale_index])
+	box.add_child(ub)
 
 func show_loading(text: String) -> void:
 	var box := _open_modal(420)
@@ -392,6 +402,7 @@ func show_knowledge_list() -> void:
 
 func show_main_menu() -> void:
 	close_all_modals()
+	hud_cards.visible = false
 	var box := _open_modal(760)
 	box.add_child(_label("ایران؛ سفر در تاریخ و اسطوره‌ها", 32, Color(0.45, 0.25, 0.08), true, HORIZONTAL_ALIGNMENT_CENTER))
 	box.add_child(_label("فصل نخست • راز زال و سیمرغ", 18, Color(0.5, 0.35, 0.12), false, HORIZONTAL_ALIGNMENT_CENTER))
