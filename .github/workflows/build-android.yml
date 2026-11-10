@@ -1,8 +1,10 @@
 name: Build Android APK
 
-on:
+"on":
   workflow_dispatch:
   push:
+    branches:
+      - "codex/**"
     tags:
       - "v*"
 
@@ -11,42 +13,55 @@ permissions:
 
 jobs:
   android:
+    name: Export Android debug APK
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
       - name: Set up Java
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "17"
+
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
+
       - name: Install Android SDK packages
         run: |
           sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0"
           yes | sdkmanager --licenses
-      - name: Download Godot and export templates
+
+      - name: Set up Godot and export templates
+        uses: chickensoft-games/setup-godot@v2
+        with:
+          version: 4.4.1
+          use-dotnet: false
+          include-templates: true
+
+      - name: Configure Godot Android SDK paths
         shell: bash
         run: |
-          set -euo pipefail
-          GODOT_VERSION="4.4.1"
-          mkdir -p "$HOME/godot" "$HOME/.local/share/godot/export_templates/$GODOT_VERSION.stable"
-          curl -L --fail --retry 3 "https://github.com/godotengine/godot/releases/download/$GODOT_VERSION-stable/Godot_v$GODOT_VERSION-stable_linux.x86_64.zip" -o "$HOME/godot/godot.zip"
-          unzip -o "$HOME/godot/godot.zip" -d "$HOME/godot"
-          curl -L --fail --retry 3 "https://github.com/godotengine/godot/releases/download/$GODOT_VERSION-stable/Godot_v$GODOT_VERSION-stable_export_templates.tpz" -o "$HOME/godot/templates.tpz"
-          unzip -o "$HOME/godot/templates.tpz" -d "$HOME/godot/templates"
-          cp -a "$HOME/godot/templates/templates/." "$HOME/.local/share/godot/export_templates/$GODOT_VERSION.stable/"
-          GODOT_BIN="$(find "$HOME/godot" -maxdepth 1 -type f -name 'Godot*' | head -n 1)"
-          chmod +x "$GODOT_BIN"
-          echo "GODOT_BIN=$GODOT_BIN" >> "$GITHUB_ENV"
+          mkdir -p "$HOME/.config/godot"
+          cat > "$HOME/.config/godot/editor_settings-4.tres" <<EOF
+          [gd_resource type="EditorSettings" format=3]
+
+          [resource]
+          export/android/android_sdk_path = "$ANDROID_HOME"
+          export/android/java_sdk_path = "$JAVA_HOME"
+          EOF
+
       - name: Import project
-        run: "$GODOT_BIN" --headless --editor --path app --quit
+        run: godot --headless --editor --path app --quit
+
       - name: Export debug APK
         run: |
           mkdir -p build
-          "$GODOT_BIN" --headless --path app --export-debug "Android" build/IranHeritageWorld-debug.apk
-      - name: Upload APK
+          godot --headless --path app --export-debug "Android" build/IranHeritageWorld-debug.apk
+          test -s build/IranHeritageWorld-debug.apk
+
+      - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: IranHeritageWorld-debug-apk
