@@ -5,8 +5,9 @@ name: Build Android APK
   push:
     branches:
       - "codex/**"
-    tags:
-      - "v*"
+    paths:
+      - "app/**"
+      - ".github/workflows/build-android.yml"
 
 permissions:
   contents: read
