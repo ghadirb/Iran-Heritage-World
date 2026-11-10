@@ -1,7 +1,8 @@
-[gd_scene load_steps=7 format=3]
+[gd_scene load_steps=8 format=3]
 
 [ext_resource type="Script" path="res://scripts/player_controller.gd" id="1_player"]
 [ext_resource type="Script" path="res://scripts/game_hud.gd" id="2_hud"]
+[ext_resource type="Script" path="res://scripts/world_controller.gd" id="3_world"]
 
 [sub_resource type="CapsuleMesh" id="CapsuleMesh_player"]
 radius = 0.42
@@ -18,6 +19,7 @@ size = Vector3(80, 1, 80)
 size = Vector3(80, 1, 80)
 
 [node name="IranHeritageWorld" type="Node3D"]
+script = ExtResource("3_world")
 
 [node name="DirectionalLight3D" type="DirectionalLight3D" parent="."]
 rotation_degrees = Vector3(-48, -32, 0)
