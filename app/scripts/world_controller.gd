@@ -52,6 +52,10 @@ func _ready() -> void:
 	hud.start_level.connect(_start_level_async)
 	hud.restart_requested.connect(func() -> void: load_level(level_index))
 	GameState.quality_changed.connect(_apply_quality)
+	if OS.get_cmdline_user_args().has("--jumptest"):
+		await get_tree().process_frame
+		await _run_jumptest()
+		return
 	if selftest:
 		await get_tree().process_frame
 		await _run_selftest()
@@ -982,3 +986,61 @@ func _selftest_difficulty_sanity() -> int:
 	if not orders.is_empty() and orders != [0, 1, 2, 3]:
 		bad += 1
 	return bad
+
+## Bot that crosses the stone pass with the real physics (CI regression test).
+func _run_jumptest() -> void:
+	var jump_dist := 3.8
+	var failures := 0
+	for variant in range(3):
+		GameState.difficulty = variant
+		load_level(1, false)
+		hud.close_all_modals()
+		await get_tree().physics_frame
+		jump_dist = [3.6, 3.8, 3.4][variant]
+		var targets: Array[Vector3] = []
+		var lip_z := float((level["chasm"] as Dictionary)["z0"]) + 3.0
+		targets.append(Vector3(terrain.path_x(lip_z), 0, lip_z))
+		var count := int((level["chain"] as Dictionary)["count"])
+		for i in range(count):
+			targets.append(chain_position(i))
+		var far_z := float((level["chasm"] as Dictionary)["z1"]) - 6.0
+		targets.append(Vector3(terrain.path_x(far_z), 0, far_z))
+		var reached := 0
+		for t in range(targets.size()):
+			var target := targets[t]
+			var frames := 0
+			var ok := false
+			while frames < 420:
+				frames += 1
+				await get_tree().physics_frame
+				var d := Vector2(target.x - player.global_position.x, target.z - player.global_position.z)
+				if d.length() < 1.5 and player.is_on_floor():
+					ok = true
+					break
+				GameState.move_vector = d.normalized()
+				if player.is_on_floor() and t > 0 and d.length() > 2.2 and (_ground_ends_ahead(d.normalized()) or d.length() < jump_dist):
+					player.request_jump()
+				elif player.is_on_floor() and t == 0 and d.length() < 0.9:
+					ok = true
+				if player.global_position.y < kill_y:
+					break
+			if not ok:
+				print("  bot stuck heading to waypoint %d at %s (target %s) frames=%d floor=%s" % [t, player.global_position, target, frames, player.is_on_floor()])
+				break
+			reached += 1
+		GameState.move_vector = Vector2.ZERO
+		print("jumptest difficulty %d (jump at %.1f m): reached %d / %d waypoints" % [variant, jump_dist, reached, targets.size()])
+		if reached < targets.size():
+			failures += 1
+	print("JUMPTEST ", "OK" if failures == 0 else "FAILED (%d)" % failures)
+	get_tree().quit(0 if failures == 0 else 1)
+
+
+
+
+## True when there is no solid ground 0.55 m ahead (a human jumps right at the lip).
+func _ground_ends_ahead(dir: Vector2) -> bool:
+	var from := player.global_position + Vector3(dir.x, 0.5, dir.y) * 0.55
+	var query := PhysicsRayQueryParameters3D.create(from, from + Vector3(0, -2.5, 0))
+	query.exclude = [player.get_rid()]
+	return get_world_3d().direct_space_state.intersect_ray(query).is_empty()

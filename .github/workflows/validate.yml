@@ -32,3 +32,7 @@ jobs:
           godot --headless --path app -- --selftest | tee selftest.log
           grep -q "SELFTEST OK" selftest.log
           ! grep -E "SCRIPT ERROR|Parse Error" selftest.log
+      - name: Stone pass crossing bot (real physics, 3 difficulties)
+        run: |
+          godot --headless --path app -- --jumptest | tee jumptest.log
+          grep -q "JUMPTEST OK" jumptest.log

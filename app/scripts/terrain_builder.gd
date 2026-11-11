@@ -87,7 +87,10 @@ func height(x: float, z: float) -> float:
 		var ch: Dictionary = cfg["chasm"]
 		var z0 := float(ch["z0"])
 		var z1 := float(ch["z1"])
-		var inside := smoothstep(z0 + 3.0, z0 - 3.0, z) * smoothstep(z1 - 3.0, z1 + 3.0, z)
+		var ew := float(ch.get("edge", 2.0))
+		# sharp, grid-aligned lips: solid ground right up to z0 and from z1 on,
+		# so the player never slides off a long slope before the first jump
+		var inside := smoothstep(z0, z0 - ew, z) * smoothstep(z1 - ew, z1, z)
 		h -= float(ch["depth"]) * inside
 	return h
 

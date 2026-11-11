@@ -32,6 +32,9 @@ a faster player. Too easy ends the game in minutes; too hard makes a child quit:
    godot --headless --editor --path app --quit          # import once
    godot --headless --path app -- --selftest            # loads every level at all 3 difficulties
    ```
+   Also run `godot --headless --path app -- --jumptest` (a bot that really jumps across the stone pass at all 3
+   difficulties; must print `JUMPTEST OK`). The chasm lips must stay sharp (`chasm.edge`), otherwise the player
+   slides off a long slope and can never reach the first stone.
    Add a check to `_selftest_difficulty_sanity()` / a carry-style physics test for every new mechanic.
 3. **Voice narration**: every narrated sentence is listed by `VoiceLines.all_lines()` (single source of truth).
    Recorded audio reads exact text, so: never edit existing `LevelData` text silently (it breaks the recording);
