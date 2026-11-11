@@ -64,6 +64,7 @@ const LEVELS: Array[Dictionary] = [
 		"subtitle": "مرحله ۳ • آتش‌های نشان‌دار",
 		"content_type": "literary_myth",
 		"intro": "بر بلندای البرز رسیده‌ای. چهار آتش را به ترتیب سرخ، آبی، زرد و سبز روشن کن.",
+		"intro_extra": "هیزم‌های پراکنده را بردار (دکمه‌ی تعامل)، به آتشدان برسان و دوباره تعامل بزن.",
 		"objective": "آتش‌ها را به ترتیب روشن کن: سرخ، آبی، زرد، سبز؛ سپس با سیمرغ سخن بگو.",
 		"progress_label": "آتش‌ها",
 		"length": 130.0, "seed": 37, "amp": 2.2, "valley_half": 14.0, "mount_rise": 0.2, "path_sway": 2.0, "slope": 0.26, "slope_max": 80.0,
@@ -78,6 +79,10 @@ const LEVELS: Array[Dictionary] = [
 			{"kind": "brazier", "id": "fire_blue", "title": "آتش آبی", "order": 1, "color": "#3b8cff", "pos": Vector2(-7.0, -112.0)},
 			{"kind": "brazier", "id": "fire_yellow", "title": "آتش زرد", "order": 2, "color": "#ffd23f", "pos": Vector2(7.0, -112.0)},
 			{"kind": "brazier", "id": "fire_green", "title": "آتش سبز", "order": 3, "color": "#4fd36a", "pos": Vector2(7.0, -96.0)},
+			{"kind": "log", "id": "log_1", "title": "هیزم", "pos": Vector2(-4.0, -64.0)},
+			{"kind": "log", "id": "log_2", "title": "هیزم", "pos": Vector2(4.0, -72.0)},
+			{"kind": "log", "id": "log_3", "title": "هیزم", "pos": Vector2(-3.0, -80.0)},
+			{"kind": "log", "id": "log_4", "title": "هیزم", "pos": Vector2(3.0, -88.0)},
 			{"kind": "npc", "id": "simorgh", "title": "سیمرغ", "pos": Vector2(0.0, -104.0), "finale": true, "speaker": "سیمرغ",
 				"lines": ["ای جوانِ سپیدموی، چرا به این بلندی آمده‌ای؟"],
 				"choices": [

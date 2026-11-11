@@ -28,11 +28,14 @@ var kill_y := -30.0
 var selftest := false
 var moving_stones: Dictionary = {}   # chain index -> {"body": AnimatableBody3D, "base": Vector3, "phase": float}
 var chain_time := 0.0
+var carrying: Dictionary = {}       # the log item the player holds (empty = nothing)
+var base_run_speed := 6.2
 
 func _ready() -> void:
 	selftest = OS.get_cmdline_user_args().has("--selftest")
 	player = PlayerController.new()
 	player.name = "Player"
+	base_run_speed = player.run_speed
 	var shape := CollisionShape3D.new()
 	var capsule := CapsuleShape3D.new()
 	capsule.radius = 0.42
@@ -116,6 +119,8 @@ func load_level(index: int, announce: bool = true) -> void:
 	brazier_next = 0
 	moving_stones.clear()
 	chain_time = 0.0
+	carrying = {}
+	player.run_speed = base_run_speed
 	items.clear()
 	grass_instances.clear()
 	clouds.clear()
@@ -154,7 +159,7 @@ func load_level(index: int, announce: bool = true) -> void:
 		voice_keys = []   # harder variants reword the text, so the recorded line would not match
 	hud.set_level_voice(voice_keys)
 	if announce:
-		hud.toast(str(level["intro"]), 7.0)
+		hud.toast((str(level["intro"]) + " " + str(level.get("intro_extra", ""))).strip_edges(), 8.0)
 
 # ---------- environment ----------
 
@@ -505,6 +510,8 @@ func _build_interactables() -> void:
 					pos += Vector3(0, 0.9, 0)
 			"brazier":
 				node = PropFactory.make_brazier(Color(str(data["color"])))
+			"log":
+				node = PropFactory.make_log()
 			"quiz":
 				node = PropFactory.make_pedestal()
 			"npc":
@@ -524,12 +531,13 @@ func _build_interactables() -> void:
 		level_root.add_child(node)
 		if str(data["kind"]) == "npc" and str(data["id"]) in ["sam", "mobed"]:
 			node.look_at(Vector3(pos.x, pos.y, pos.z + 10.0))
-		items.append({"data": data, "node": node, "done": false, "base_y": pos.y})
+		items.append({"data": data, "node": node, "done": false, "base_y": pos.y, "home": pos})
 
 func _non_finale_items() -> Array[Dictionary]:
 	var out: Array[Dictionary] = []
 	for it in items:
-		if not bool((it["data"] as Dictionary).get("finale", false)):
+		var d: Dictionary = it["data"]
+		if not bool(d.get("finale", false)) and str(d["kind"]) != "log":   # logs are tools, not goals
 			out.append(it)
 	return out
 
@@ -547,11 +555,13 @@ func _refresh_progress() -> void:
 			done_count += 1
 	hud.set_progress(str(level["progress_label"]), done_count, req.size())
 
-func _nearest_item() -> Dictionary:
+func _nearest_item(only_kind: String = "") -> Dictionary:
 	var best: Dictionary = {}
 	var best_d := interact_radius
 	for it in items:
 		if bool(it["done"]) and str((it["data"] as Dictionary)["kind"]) != "brazier":
+			continue
+		if only_kind != "" and str((it["data"] as Dictionary)["kind"]) != only_kind:
 			continue
 		var node: Node3D = it["node"]
 		if not is_instance_valid(node):
@@ -567,6 +577,14 @@ func _nearest_item() -> Dictionary:
 func _interact() -> void:
 	if not level_active or hud.is_modal_open():
 		return
+	if not carrying.is_empty():
+		# Holding firewood: interact at a fire to place it, anywhere else to put it down.
+		var fire := _nearest_item("brazier")
+		if fire.is_empty():
+			_drop_log()
+		else:
+			_use_brazier(fire)
+		return
 	var it := _nearest_item()
 	if it.is_empty():
 		hud.toast("به یکی از نشانه‌های درخشان نزدیک شو و دکمه «تعامل» را بزن.", 3.0)
@@ -579,6 +597,8 @@ func _interact() -> void:
 			if GameState.voice_mode == 2:
 				AudioManager.play_voice("%s__hint_%s" % [str(level["id"]), str(d["id"])])
 			_check_finish()
+		"log":
+			_pick_log(it)
 		"brazier":
 			_use_brazier(it)
 		"quiz":
@@ -605,6 +625,7 @@ func _collect(it: Dictionary) -> void:
 		level_root.add_child(burst)
 		get_tree().create_timer(2.0).timeout.connect(burst.queue_free)
 		node.queue_free()
+		it["node"] = null   # a freed node must not stay referenced by _process
 	_mark_done(it)
 
 func _mark_done(it: Dictionary) -> void:
@@ -619,13 +640,60 @@ func _set_pedestal_done(it: Dictionary) -> void:
 		level_root.add_child(burst)
 		get_tree().create_timer(2.0).timeout.connect(burst.queue_free)
 
+func _has_logs() -> bool:
+	for it in items:
+		if str((it["data"] as Dictionary)["kind"]) == "log":
+			return true
+	return false
+
+func _pick_log(it: Dictionary) -> void:
+	carrying = it
+	it["done"] = true   # hidden from "nearest item" while carried
+	var node: Node3D = it["node"]
+	node.reparent(player, false)
+	node.position = Vector3(0, 2.3, 0)
+	node.rotation = Vector3.ZERO
+	player.run_speed = base_run_speed * float(DifficultyRules.CARRY_SPEED[GameState.difficulty])
+	hud.toast("هیزم برداشتی و کندتر می‌دوی. در آتشدان تعامل بزن؛ دور از آتشدان، هیزم را زمین می‌گذارد.", 4.5)
+
+func _release_log() -> void:
+	carrying = {}
+	player.run_speed = base_run_speed
+
+func _drop_log() -> void:
+	var it := carrying
+	var node: Node3D = it["node"]
+	var x := player.global_position.x
+	var z := player.global_position.z
+	node.reparent(level_root, false)
+	node.position = Vector3(x, terrain.height(x, z), z)
+	it["done"] = false
+	_release_log()
+	hud.toast("هیزم را زمین گذاشتی.", 2.0)
+
+## Wrong fire: the wood is not lost, it goes back where it was found.
+func _return_log() -> void:
+	var it := carrying
+	var node: Node3D = it["node"]
+	node.reparent(level_root, false)
+	node.position = it["home"]
+	it["done"] = false
+	_release_log()
+
 func _use_brazier(it: Dictionary) -> void:
 	var d: Dictionary = it["data"]
 	if bool(it["done"]):
 		hud.toast("این آتش پیش‌تر روشن شده است.", 2.0)
 		return
+	if _has_logs() and carrying.is_empty():
+		hud.toast("برای روشن کردن آتش، نخست یک هیزم بردار و بیاور.", 3.5)
+		return
 	if int(d["order"]) == brazier_next:
 		brazier_next += 1
+		if not carrying.is_empty():
+			(carrying["node"] as Node3D).queue_free()   # the wood burns
+			carrying["node"] = null   # never keep a freed node in an item (typed reads would error)
+			_release_log()
 		_mark_done(it)
 		var node: Node3D = it["node"]
 		var flame := PropFactory.make_flame(Color(str(d["color"])))
@@ -635,6 +703,8 @@ func _use_brazier(it: Dictionary) -> void:
 	else:
 		mistakes += 1
 		brazier_next = 0
+		if not carrying.is_empty():
+			_return_log()
 		for other in items:
 			if str((other["data"] as Dictionary)["kind"]) == "brazier":
 				other["done"] = false
@@ -793,6 +863,8 @@ func _selftest_level(i: int) -> int:
 	load_level(i, false)
 	await get_tree().process_frame
 	await get_tree().physics_frame
+	if _has_logs():
+		failures += await _selftest_logs()
 	for it in items:
 		if not bool((it["data"] as Dictionary).get("finale", false)):
 			it["done"] = true
@@ -823,6 +895,45 @@ func _selftest_level(i: int) -> int:
 	hud.close_all_modals()
 	finished = false
 	return failures
+
+## Firewood flow: no wood = no fire; correct fire burns it; wrong fire returns it; drop works.
+func _selftest_logs() -> int:
+	var bad := 0
+	var logs: Array = []
+	var fires: Dictionary = {}
+	for it in items:
+		var d: Dictionary = it["data"]
+		if str(d["kind"]) == "log":
+			logs.append(it)
+		elif str(d["kind"]) == "brazier":
+			fires[int(d["order"])] = it
+	player.global_position = (fires[0]["node"] as Node3D).global_position + Vector3(1.0, 0.5, 0)
+	_interact()   # no wood: must NOT light the fire
+	if bool(fires[0]["done"]) or brazier_next != 0:
+		bad += 1
+	player.global_position = (logs[0]["node"] as Node3D).global_position + Vector3(0.8, 0.5, 0)
+	_interact()   # pick up
+	if carrying.is_empty() or player.run_speed >= base_run_speed:
+		bad += 1
+	player.global_position = (fires[2]["node"] as Node3D).global_position + Vector3(1.0, 0.5, 0)
+	_interact()   # wrong fire: wood returns, fires reset
+	if not carrying.is_empty() or bool(logs[0]["done"]) or brazier_next != 0:
+		bad += 1
+	player.global_position = (logs[0]["node"] as Node3D).global_position + Vector3(0.8, 0.5, 0)
+	_interact()
+	player.global_position = Vector3(player.global_position.x, player.global_position.y, player.global_position.z + 12.0)
+	_interact()   # far from any fire: drop
+	if not carrying.is_empty() or player.run_speed != base_run_speed:
+		bad += 1
+	player.global_position = (logs[0]["node"] as Node3D).global_position + Vector3(0.8, 0.5, 0)
+	_interact()
+	player.global_position = (fires[0]["node"] as Node3D).global_position + Vector3(1.0, 0.5, 0)
+	_interact()   # right fire: lit, wood burned
+	if not bool(fires[0]["done"]) or brazier_next != 1 or not carrying.is_empty():
+		bad += 1
+	print("  log flow: %s" % ("ok" if bad == 0 else "FAILED (%d)" % bad))
+	player.global_position = spawn_point
+	return bad
 
 ## A player standing on a sliding stone must be carried along, not left behind.
 func _selftest_carry() -> int:

@@ -252,6 +252,17 @@ static func make_flame(color: Color) -> Node3D:
 
 # ---------- collectibles ----------
 
+## A piece of firewood the player can pick up and carry (see WorldController._pick_log).
+static func make_log() -> Node3D:
+	var root := Node3D.new()
+	var body := part(cylinder(0.22, 0.22, 1.4, 8), mat(Color("#6b4a2b"), 0.95), Vector3(0, 0.25, 0))
+	body.rotation.z = PI * 0.5
+	root.add_child(body)
+	var halo := part(sphere(0.12, 8), mat(Color("#ffb347"), 0.2, 0.2, 2.0), Vector3(0, 0.95, 0))
+	halo.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	root.add_child(halo)
+	return root
+
 static func make_clue_marker(kind: String) -> Node3D:
 	var root := Node3D.new()
 	var glow := mat(Color("#ffd36b"), 0.2, 0.2, 2.4)

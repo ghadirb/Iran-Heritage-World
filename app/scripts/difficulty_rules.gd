@@ -14,6 +14,9 @@ const FIRE_SEQUENCE := [["fire_red", "fire_blue", "fire_yellow", "fire_green"], 
 const MOVING_STONES := [0, 3, 4]       # how many chasm stones slide sideways
 const MOVING_AMP := [0.0, 1.5, 2.2]       # metres either side
 const MOVING_SPEED := [0.0, 0.8, 1.1]
+const CARRY_SPEED := [0.9, 0.8, 0.68]   # run-speed factor while carrying a log
+const LOG_FAR := [0.0, 22.0, 45.0]        # extra metres between logs and the fires
+const LOG_WIDE := [1.0, 1.6, 2.2]
 const SIDE_FACTORS := [1.0, 0.55, 0.9, 0.7]
 
 ## Challenge mode counts change, so these objective texts avoid numbers.
@@ -58,6 +61,7 @@ static func apply(src: Dictionary, d: int) -> Dictionary:
 	if lv.has("chain"):
 		_widen_chain(lv, items, d)
 	_hide_fire_order(lv, items, d)
+	_scatter_logs(lv, items, d)
 	_shuffle_quiz_options(items)
 	return lv
 
@@ -158,6 +162,16 @@ static func _hide_fire_order(lv: Dictionary, items: Array, d: int) -> void:
 	lv["intro"] = "بر بلندای البرز رسیده‌ای. آتش‌ها را به ترتیب این سرنخ روشن کن: " + riddle
 	lv["objective"] = "آتش‌ها را به ترتیب سرنخ روشن کن؛ " + riddle + " سپس با سیمرغ سخن بگو."
 	lv["no_level_voice"] = true
+
+## Firewood starts farther from the fires and more spread out, so carrying it is a real trip.
+static func _scatter_logs(lv: Dictionary, items: Array, d: int) -> void:
+	var limit := float(lv.get("valley_half", 12.0)) * 0.9
+	for it in items:
+		var data: Dictionary = it
+		if str(data["kind"]) != "log":
+			continue
+		var p: Vector2 = data["pos"]
+		data["pos"] = Vector2(clampf(p.x * LOG_WIDE[d], -limit, limit), p.y + LOG_FAR[d])
 
 ## Answers no longer always sit in the same place.
 static func _shuffle_quiz_options(items: Array) -> void:

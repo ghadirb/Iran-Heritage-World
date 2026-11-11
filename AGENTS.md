@@ -14,8 +14,8 @@ Mechanics already in the game (reuse before inventing):
 | Level | Real action | Where |
 |---|---|---|
 | stone_pass | jump across a chasm; some stones slide sideways and carry the player | `_build_platform_chain`, `_physics_process`, `DifficultyRules._pick_moving_stones` |
-| simorgh_nest | fire puzzle (order from a riddle on medium/challenge) | `_use_brazier` |
-| (planned) | carry firewood to braziers, push a log to bridge a river, bow aiming, chase/flee | see design doc section 4 |
+| simorgh_nest | **carry firewood** (slows you down) to the fires; fire order from a riddle on medium/challenge; wrong fire returns the wood | `_pick_log`, `_drop_log`, `_return_log`, `_use_brazier`, `DifficultyRules._scatter_logs` |
+| (planned) | push a log to bridge a river, bow aiming, chase/flee | see design doc section 4 |
 
 ## Difficulty is mandatory, not optional
 Three levels: 0 easy (original data), 1 medium (default), 2 challenge. They are NOT hand-written
@@ -44,7 +44,8 @@ a faster player. Too easy ends the game in minutes; too hard makes a child quit:
 6. **Persian UI**: all player text in Persian, large touch targets, works with `ui_scale`.
 7. **Small, surgical commits.** Commit message explains the *symptom* and the *root cause*, then the fix
    and how it was verified. Do not rewrite files wholesale.
-8. **Never commit tokens/keys**, and never paste them into files or logs. Tokens are revoked by the owner.
+8. **Never keep a freed node in an item dict**: after `queue_free()` set `it["node"] = null` (typed reads of freed nodes spam `SCRIPT ERROR`; the selftest log must have zero of them).
+9. **Never commit tokens/keys**, and never paste them into files or logs. Tokens are revoked by the owner.
 
 ## How to add a new level (checklist)
 1. Add an entry to `LevelData.LEVELS` (copy the nearest existing one). Include `content_type`, intro,
