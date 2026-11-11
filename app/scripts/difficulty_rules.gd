@@ -11,6 +11,9 @@ const CHAIN_COUNT := [22, 15, 11]          # stone platforms in the chasm (fewer
 const CHAIN_SWAY := [1.1, 1.8, 2.6]
 const FIRE_WORDS := {"fire_red": "رنگ خون", "fire_blue": "رنگ آسمان", "fire_yellow": "رنگ خورشید", "fire_green": "رنگ بهار"}
 const FIRE_SEQUENCE := [["fire_red", "fire_blue", "fire_yellow", "fire_green"], ["fire_red", "fire_blue", "fire_yellow", "fire_green"], ["fire_blue", "fire_green", "fire_red", "fire_yellow"]]
+const MOVING_STONES := [0, 3, 4]       # how many chasm stones slide sideways
+const MOVING_AMP := [0.0, 1.5, 2.2]       # metres either side
+const MOVING_SPEED := [0.0, 0.8, 1.1]
 const SIDE_FACTORS := [1.0, 0.55, 0.9, 0.7]
 
 ## Challenge mode counts change, so these objective texts avoid numbers.
@@ -117,6 +120,27 @@ static func _widen_chain(lv: Dictionary, items: Array, d: int) -> void:
 		if data.has("on_chain"):
 			var idx := int(data["on_chain"])
 			data["on_chain"] = clampi(roundi(float(idx) * float(new_count - 1) / float(old_count - 1)), 0, new_count - 1)
+	_pick_moving_stones(ch, items, d, new_count)
+
+## Real platforming: some stones slide sideways. Stones with a clue, and the first/last stone, stay still.
+static func _pick_moving_stones(ch: Dictionary, items: Array, d: int, count: int) -> void:
+	var taken := {}
+	for it in items:
+		if (it as Dictionary).has("on_chain"):
+			taken[int((it as Dictionary)["on_chain"])] = true
+	var free: Array = []
+	for i in range(1, count - 1):
+		if not taken.has(i):
+			free.append(i)
+	var want: int = MOVING_STONES[d]
+	var moving: Array = []
+	if free.size() > 0 and want > 0:
+		var step := float(free.size()) / float(want)
+		for k in range(mini(want, free.size())):
+			moving.append(free[mini(int(float(k) * step), free.size() - 1)])
+	ch["moving"] = moving
+	ch["move_amp"] = MOVING_AMP[d]
+	ch["move_speed"] = MOVING_SPEED[d]
 
 ## The fire order is no longer spelled out in plain words; the player must read a riddle.
 static func _hide_fire_order(lv: Dictionary, items: Array, d: int) -> void:

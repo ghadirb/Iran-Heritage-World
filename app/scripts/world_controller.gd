@@ -26,6 +26,8 @@ var level_active := false
 var finished := false
 var kill_y := -30.0
 var selftest := false
+var moving_stones: Dictionary = {}   # chain index -> {"body": AnimatableBody3D, "base": Vector3, "phase": float}
+var chain_time := 0.0
 
 func _ready() -> void:
 	selftest = OS.get_cmdline_user_args().has("--selftest")
@@ -112,6 +114,8 @@ func load_level(index: int, announce: bool = true) -> void:
 	finished = false
 	mistakes = 0
 	brazier_next = 0
+	moving_stones.clear()
+	chain_time = 0.0
 	items.clear()
 	grass_instances.clear()
 	clouds.clear()
@@ -388,19 +392,52 @@ func _build_platform_chain() -> void:
 	for i in range(int(ch["count"])):
 		var p := chain_position(i)
 		var holder := Node3D.new()
-		holder.position = p
+		var is_moving: bool = (ch.get("moving", []) as Array).has(i)
+		holder.position = Vector3.ZERO if is_moving else p
 		holder.rotation.y = sin(float(i) * 2.1) * 0.5
 		holder.add_child(PropFactory.part(PropFactory.box(Vector3(3.4, 1.4, 3.4)), stone, Vector3(0, -0.7, 0)))
 		holder.add_child(PropFactory.part(PropFactory.box(Vector3(3.5, 0.12, 3.5)), moss, Vector3(0, -0.04, 0)))
 		holder.add_child(PropFactory.part(PropFactory.cylinder(0.9, 0.2, 6.0, 7), stone, Vector3(0, -4.4, 0)))
-		level_root.add_child(holder)
 		var cs := CollisionShape3D.new()
 		var bx := BoxShape3D.new()
 		bx.size = Vector3(3.4, 1.4, 3.4)
 		cs.shape = bx
-		cs.position = p + Vector3(0, -0.7, 0)
 		cs.rotation.y = holder.rotation.y
-		body.add_child(cs)
+		if is_moving:
+			# A sliding stone is its own AnimatableBody3D so it carries the player.
+			var mover := AnimatableBody3D.new()
+			mover.name = "MovingStone%d" % i
+			mover.sync_to_physics = true
+			mover.position = p
+			cs.position = Vector3(0, -0.7, 0)
+			mover.add_child(cs)
+			mover.add_child(holder)
+			level_root.add_child(mover)
+			moving_stones[i] = {"body": mover, "base": p, "phase": float(i) * 1.7}
+		else:
+			level_root.add_child(holder)
+			cs.position = p + Vector3(0, -0.7, 0)
+			body.add_child(cs)
+
+## Where a stone is right now (moving stones slide, the rest never move).
+func stone_now(i: int) -> Vector3:
+	if moving_stones.has(i):
+		var m: Dictionary = moving_stones[i]
+		if is_instance_valid(m["body"]):
+			return (m["body"] as Node3D).global_position
+	return chain_position(i)
+
+func _physics_process(delta: float) -> void:
+	if not level_active or moving_stones.is_empty():
+		return
+	chain_time += delta
+	var ch: Dictionary = level["chain"]
+	var amp := float(ch.get("move_amp", 0.0))
+	var spd := float(ch.get("move_speed", 0.0))
+	for i in moving_stones:
+		var m: Dictionary = moving_stones[i]
+		if is_instance_valid(m["body"]):
+			(m["body"] as Node3D).position = (m["base"] as Vector3) + Vector3(sin(chain_time * spd + float(m["phase"])) * amp, 0, 0)
 
 func _build_ambient_particles() -> void:
 	var p := CPUParticles3D.new()
@@ -696,7 +733,9 @@ func _respawn() -> void:
 func _update_platform_checkpoint() -> void:
 	var ch: Dictionary = level["chain"]
 	for i in range(int(ch["count"])):
-		var p := chain_position(i)
+		if moving_stones.has(i):
+			continue   # never respawn onto a stone that has slid away
+		var p := stone_now(i)
 		var horizontal := Vector2(player.global_position.x - p.x, player.global_position.z - p.z).length()
 		if horizontal <= 1.45 and absf(player.global_position.y - p.y) <= 1.9:
 			checkpoint = player.global_position
@@ -770,6 +809,8 @@ func _selftest_level(i: int) -> int:
 			"npc":
 				hud.show_dialogue(str(d["speaker"]), d["lines"], d.get("choices", []), d.get("after", []), func() -> void: pass)
 				hud.close_all_modals()
+	if not moving_stones.is_empty():
+		failures += await _selftest_carry()
 	await get_tree().create_timer(0.3).timeout
 	# the player must stand on the terrain after a short settle
 	for _f in range(40):
@@ -782,6 +823,23 @@ func _selftest_level(i: int) -> int:
 	hud.close_all_modals()
 	finished = false
 	return failures
+
+## A player standing on a sliding stone must be carried along, not left behind.
+func _selftest_carry() -> int:
+	var idx: int = moving_stones.keys()[0]
+	var start := stone_now(idx)
+	player.global_position = start + Vector3(0, 1.0, 0)
+	player.velocity = Vector3.ZERO
+	for _f in range(30):
+		await get_tree().physics_frame
+	var x0 := player.global_position.x - stone_now(idx).x
+	for _f in range(90):
+		await get_tree().physics_frame
+	var x1 := player.global_position.x - stone_now(idx).x
+	var still_on := player.is_on_floor() and absf(x1) < 1.7
+	print("  carry test: stone %d offset %.2f -> %.2f on_stone=%s" % [idx, x0, x1, still_on])
+	player.global_position = spawn_point
+	return 0 if still_on else 1
 
 ## Harder variants must stay finishable: valid quiz answers, clues on real stones, nothing below the kill line.
 func _selftest_difficulty_sanity() -> int:
@@ -798,6 +856,11 @@ func _selftest_difficulty_sanity() -> int:
 		if is_instance_valid(node) and node.global_position.y < kill_y + 2.0:
 			print("  unreachable item: ", d["id"])
 			bad += 1
+	if level.has("chain"):
+		var chd: Dictionary = level["chain"]
+		for mi in (chd.get("moving", []) as Array):
+			if int(mi) <= 0 or int(mi) >= int(chd["count"]) - 1 or not moving_stones.has(int(mi)):
+				bad += 1
 	var orders := []
 	for it in items:
 		if str((it["data"] as Dictionary)["kind"]) == "brazier":
