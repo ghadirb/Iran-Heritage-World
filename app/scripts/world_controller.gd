@@ -590,7 +590,7 @@ func _interact() -> void:
 		return
 	var it := _nearest_item()
 	if it.is_empty():
-		hud.toast("به یکی از نشانه‌های درخشان نزدیک شو و دکمه «تعامل» را بزن.", 3.0)
+		_msg("nothing_near", 3.0)
 		return
 	var d: Dictionary = it["data"]
 	match str(d["kind"]):
@@ -614,7 +614,7 @@ func _interact() -> void:
 					_check_finish())
 		"npc":
 			if bool(d.get("finale", false)) and not _required_done():
-				hud.toast(str(d["hint"]), 3.5)
+				_say(str(d["hint"]), "%s__%s_locked" % [str(level["id"]), str(d["id"])], 3.5)
 				return
 			hud.show_dialogue(str(d["speaker"]), d["lines"], d.get("choices", []), d.get("after", []), func() -> void:
 				_mark_done(it)
@@ -643,6 +643,15 @@ func _set_pedestal_done(it: Dictionary) -> void:
 		level_root.add_child(burst)
 		get_tree().create_timer(2.0).timeout.connect(burst.queue_free)
 
+## Shows a message and, in automatic narration mode, speaks it when a recording exists.
+func _say(text: String, voice_key: String, seconds: float) -> void:
+	hud.toast(text, seconds)
+	if GameState.voice_mode == 2:
+		AudioManager.play_voice(voice_key)
+
+func _msg(id: String, seconds: float) -> void:
+	_say(str(GameMessages.TEXT[id]), "game__" + id, seconds)
+
 func _has_logs() -> bool:
 	for it in items:
 		if str((it["data"] as Dictionary)["kind"]) == "log":
@@ -657,7 +666,7 @@ func _pick_log(it: Dictionary) -> void:
 	node.position = Vector3(0, 2.3, 0)
 	node.rotation = Vector3.ZERO
 	player.run_speed = base_run_speed * float(DifficultyRules.CARRY_SPEED[GameState.difficulty])
-	hud.toast("هیزم برداشتی و کندتر می‌دوی. در آتشدان تعامل بزن؛ دور از آتشدان، هیزم را زمین می‌گذارد.", 4.5)
+	_msg("log_pick", 4.5)
 
 func _release_log() -> void:
 	carrying = {}
@@ -672,7 +681,7 @@ func _drop_log() -> void:
 	node.position = Vector3(x, terrain.height(x, z), z)
 	it["done"] = false
 	_release_log()
-	hud.toast("هیزم را زمین گذاشتی.", 2.0)
+	_msg("log_drop", 2.0)
 
 ## Wrong fire: the wood is not lost, it goes back where it was found.
 func _return_log() -> void:
@@ -689,7 +698,7 @@ func _use_brazier(it: Dictionary) -> void:
 		hud.toast("این آتش پیش‌تر روشن شده است.", 2.0)
 		return
 	if _has_logs() and carrying.is_empty():
-		hud.toast("برای روشن کردن آتش، نخست یک هیزم بردار و بیاور.", 3.5)
+		_msg("need_log", 3.5)
 		return
 	if int(d["order"]) == brazier_next:
 		brazier_next += 1
@@ -701,7 +710,7 @@ func _use_brazier(it: Dictionary) -> void:
 		var node: Node3D = it["node"]
 		var flame := PropFactory.make_flame(Color(str(d["color"])))
 		node.add_child(flame)
-		hud.toast("%s روشن شد." % str(d["title"]), 2.5)
+		_say(GameMessages.FIRE_LIT % str(d["title"]), "%s__fire_lit_%s" % [str(level["id"]), str(d["id"])], 2.5)
 		_check_finish()
 	else:
 		mistakes += 1
@@ -716,7 +725,7 @@ func _use_brazier(it: Dictionary) -> void:
 				if fl:
 					fl.queue_free()
 		_refresh_progress()
-		hud.toast("ترتیب درست نبود؛ آتش‌ها خاموش شدند. %s" % str(level.get("order_hint", "سرخ، آبی، زرد، سبز.")), 5.0)
+		_say(GameMessages.wrong_order(level), str(level.get("voice_order_wrong", "%s__order_wrong" % str(level["id"]))), 5.0)
 
 func _check_finish() -> void:
 	if finished:
@@ -728,7 +737,7 @@ func _check_finish() -> void:
 				has_finale = true
 		if has_finale:
 			hud.set_objective("اکنون به سراغ «%s» برو و با او سخن بگو." % _finale_title())
-			hud.toast("همه‌ی بخش‌ها کامل شد. به سراغ «%s» برو." % _finale_title(), 5.0)
+			_say(GameMessages.GO_FINALE % _finale_title(), "%s__go_finale" % str(level["id"]), 5.0)
 		else:
 			_finish_level()
 
@@ -801,7 +810,7 @@ func _simorgh_index() -> int:
 func _respawn() -> void:
 	player.global_position = checkpoint
 	player.velocity = Vector3.ZERO
-	hud.toast("از لبه افتادی؛ دوباره تلاش کن.", 3.0)
+	_msg("fall", 3.0)
 
 func _update_platform_checkpoint() -> void:
 	var ch: Dictionary = level["chain"]

@@ -39,7 +39,10 @@ a faster player. Too easy ends the game in minutes; too hard makes a child quit:
    `DifficultyRules`); any new clue/quiz/NPC/`intro_extra` text is picked up by `VoiceLines` automatically.
    After adding text, run `godot --headless --path app -s ../tools/export_voice_script.gd`, commit the regenerated
    `documentation/voice-script.csv` and `voice-missing.csv` (the lines the owner must record). Missing audio is
-   never an error: the game stays silent for that line. Use only voices from `documentation/voice-characters.md`;
+   never an error: the game stays silent for that line. Short messages shown to the player (toasts) must come from
+   `GameMessages` (text defined once, voiced as `game__<id>` / `<level>__fire_lit_<id>` ...), never as literals in
+   `world_controller`; use `_say()` / `_msg()` so they are also spoken in automatic narration mode. Quiz answer options
+   are narrated as `<quiz>_opt<N>` (N = original option number; the game shuffles options on medium/challenge). Use only voices from `documentation/voice-characters.md`;
    one character = one voice.
 4. **Content honesty**: myth and literature are labelled as such (`content_type`). Quiz questions and
    knowledge entries must come from the sourced content in-game or be reviewed; never invent history.

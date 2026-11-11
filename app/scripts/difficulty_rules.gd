@@ -164,6 +164,7 @@ static func _hide_fire_order(lv: Dictionary, items: Array, d: int) -> void:
 	lv["objective"] = "آتش‌ها را به ترتیب سرنخ روشن کن؛ " + riddle + " سپس با سیمرغ سخن بگو."
 	lv["voice_intro"] = "%s__intro_d%d" % [str(lv["id"]), d]
 	lv["voice_objective"] = "%s__objective_d%d" % [str(lv["id"]), d]
+	lv["voice_order_wrong"] = "%s__order_wrong_d%d" % [str(lv["id"]), d]
 
 ## Firewood starts farther from the fires and more spread out, so carrying it is a real trip.
 static func _scatter_logs(lv: Dictionary, items: Array, d: int) -> void:
@@ -185,11 +186,15 @@ static func _shuffle_quiz_options(items: Array) -> void:
 			continue
 		var opts: Array = data["options"]
 		var correct_text := str(opts[int(data["answer"])])
-		var shuffled: Array = opts.duplicate()
-		for i in range(shuffled.size() - 1, 0, -1):
+		var order: Array = range(opts.size())   # order[k] = original index of the option now shown at k
+		for i in range(order.size() - 1, 0, -1):
 			var j := rng.randi_range(0, i)
-			var tmp: Variant = shuffled[i]
-			shuffled[i] = shuffled[j]
-			shuffled[j] = tmp
+			var tmp: Variant = order[i]
+			order[i] = order[j]
+			order[j] = tmp
+		var shuffled: Array = []
+		for oi in order:
+			shuffled.append(opts[int(oi)])
 		data["options"] = shuffled
+		data["option_ids"] = order   # narration key of option k is <quiz>_opt<option_ids[k]+1>
 		data["answer"] = shuffled.find(correct_text)

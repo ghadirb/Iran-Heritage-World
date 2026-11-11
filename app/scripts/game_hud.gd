@@ -370,16 +370,26 @@ func show_quiz(data: Dictionary, on_result: Callable) -> void:
 	var e_key := _vk("%s_explain" % str(data["id"]))
 	var bottom := HBoxContainer.new()
 	bottom.add_theme_constant_override("separation", 10)
+	var ids: Array = data.get("option_ids", [])   # original option index per shown option (after shuffling)
+	var opt_keys: Array = []
+	for i in range(options.size()):
+		opt_keys.append(_vk("%s_opt%d" % [str(data["id"]), (int(ids[i]) if i < ids.size() else i) + 1]))
 	for i in range(options.size()):
 		var idx := i
-		var b := _button(str(options[i]), func() -> void: pass, Vector2(660, 56))
+		var ovb := _voice_button([opt_keys[i]])
+		var b := _button(str(options[i]), func() -> void: pass, Vector2(660 - (148 if ovb else 0), 56))
 		buttons.append(b)
-		box.add_child(b)
+		var orow := HBoxContainer.new()
+		orow.add_theme_constant_override("separation", 8)
+		orow.add_child(b)
+		if ovb:
+			orow.add_child(ovb)
+		box.add_child(orow)
 		b.pressed.connect(func() -> void:
 			if idx == answer:
 				for other in buttons:
 					other.disabled = true
-				feedback.text = "✔ درست! " + str(data["explain"])
+				feedback.text = "✔ " + str(GameMessages.TEXT["quiz_correct"]) + " " + str(data["explain"])
 				feedback.add_theme_color_override("font_color", Color(0.12, 0.42, 0.2))
 				var cont := _button("ادامه", func() -> void:
 					AudioManager.stop_voice()
@@ -389,25 +399,26 @@ func show_quiz(data: Dictionary, on_result: Callable) -> void:
 				var eb := _voice_button([e_key])
 				if eb:
 					bottom.add_child(eb)
-				_auto_voice([e_key])
+				_auto_voice(["game__quiz_correct", e_key])
 			else:
 				b.disabled = true
-				feedback.text = "✘ پاسخ درست نیست؛ دوباره فکر کن."
+				feedback.text = "✘ " + str(GameMessages.TEXT["quiz_wrong"])
+				_auto_voice(["game__quiz_wrong"])
 				feedback.add_theme_color_override("font_color", Color(0.6, 0.15, 0.1))
 				on_result.call(false, false))
 	box.add_child(feedback)
 	bottom.add_child(_button("بستن", func() -> void:
 		AudioManager.stop_voice()
 		close_top_modal(), Vector2(140, 44)))
-	var qb := _voice_button([q_key])
+	var qb := _voice_button([q_key] + opt_keys)
 	if qb:
 		bottom.add_child(qb)
 	box.add_child(bottom)
-	_auto_voice([q_key])
+	_auto_voice([q_key] + opt_keys)
 
 func show_level_complete(level: Dictionary, star_count: int, has_next: bool, on_next: Callable) -> void:
 	var box := _open_modal(700)
-	box.add_child(_label("مرحله کامل شد!", 30, Color(0.45, 0.25, 0.08), true, HORIZONTAL_ALIGNMENT_CENTER))
+	box.add_child(_label(GameMessages.TEXT["level_complete"], 30, Color(0.45, 0.25, 0.08), true, HORIZONTAL_ALIGNMENT_CENTER))
 	var stars := ""
 	for i in range(3):
 		stars += "★" if i < star_count else "☆"
@@ -436,7 +447,7 @@ func show_level_complete(level: Dictionary, star_count: int, has_next: bool, on_
 	var kb := _voice_button([k_key])
 	if kb:
 		row.add_child(kb)
-	_auto_voice([k_key])
+	_auto_voice(["game__level_complete", k_key])
 
 func show_pause_menu() -> void:
 	if not modal_stack.is_empty():

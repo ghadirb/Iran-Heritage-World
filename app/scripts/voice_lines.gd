@@ -44,6 +44,38 @@ static func _interactable_rows(rows: Array, seen: Dictionary, lid: String, items
 				for k in range(after.size()):
 					_row(rows, seen, lid, "%s_A%d" % [id, k + 1], "ادامه گفت‌وگو", who, str(after[k]), 1, base)
 
+## Reading the answer options aloud: key <quiz>_opt<N>, N = original option number (stable under shuffling).
+static func _option_rows(rows: Array, seen: Dictionary, lid: String, items: Array, tag: String) -> void:
+	for d in items:
+		if str(d["kind"]) != "quiz":
+			continue
+		var ids: Array = d.get("option_ids", [])
+		var opts: Array = d["options"]
+		var pairs: Array = []
+		for j in range(opts.size()):
+			pairs.append([(int(ids[j]) if j < ids.size() else j), str(opts[j])])
+		pairs.sort_custom(func(a: Array, b: Array) -> bool: return int(a[0]) < int(b[0]))
+		for p in pairs:
+			_row(rows, seen, lid, "%s_opt%d" % [str(d["id"]), int(p[0]) + 1], "گزینه‌ی پرسش" + tag, "دانشنامه", str(p[1]), 1, false)
+
+## Short in-game messages that are not story text (see GameMessages). Level-independent ones use level "game".
+static func _message_rows(rows: Array, seen: Dictionary) -> void:
+	for id in GameMessages.TEXT:
+		_row(rows, seen, "game", str(id), "پیام کوتاه بازی", "راوی", str(GameMessages.TEXT[id]), 2, false)
+	for level in LevelData.LEVELS:
+		var lid := str(level["id"])
+		var finale_title := ""
+		for d in level["interactables"]:
+			match str(d["kind"]):
+				"brazier":
+					_row(rows, seen, lid, "fire_lit_" + str(d["id"]), "پیام کوتاه بازی (آتش روشن شد)", "راوی", GameMessages.FIRE_LIT % str(d["title"]), 2, false)
+				"npc":
+					if bool(d.get("finale", false)):
+						finale_title = str(d["title"])
+						_row(rows, seen, lid, "%s_locked" % str(d["id"]), "پیام کوتاه بازی (هنوز زود است)", "راوی", str(d["hint"]), 2, false)
+		if finale_title != "":
+			_row(rows, seen, lid, "go_finale", "پیام کوتاه بازی (برو سراغ شخصیت)", "راوی", GameMessages.GO_FINALE % finale_title, 2, false)
+
 static func all_lines() -> Array:
 	var rows: Array = []
 	var seen := {}
@@ -70,4 +102,23 @@ static func all_lines() -> Array:
 			if str(v["objective"]) != str(level["objective"]):
 				_row(rows, seen, lid, "objective_d%d" % diff, "هدف مرحله" + tag, "راوی", str(v["objective"]), 1, false)
 			_interactable_rows(rows, seen, lid, v["interactables"], base_ids, false, tag)
+	# 3) answer options read aloud + short in-game messages (appended last: rows above keep their numbers)
+	for level in LevelData.LEVELS:
+		var lid := str(level["id"])
+		_option_rows(rows, seen, lid, level["interactables"], "")
+		if _has_kind(level, "brazier"):
+			_row(rows, seen, lid, "order_wrong", "پیام کوتاه بازی (ترتیب آتش‌ها اشتباه بود)", "راوی", GameMessages.wrong_order(level), 2, false)
+		for diff in [1, 2]:
+			var v: Dictionary = DifficultyRules.apply(level, diff)
+			var tag := " (سختی %s)" % DifficultyRules.NAMES[diff]
+			_option_rows(rows, seen, lid, v["interactables"], tag)
+			if v.has("order_hint"):
+				_row(rows, seen, lid, "order_wrong_d%d" % diff, "پیام کوتاه بازی (ترتیب آتش‌ها اشتباه بود)" + tag, "راوی", GameMessages.wrong_order(v), 2, false)
+	_message_rows(rows, seen)
 	return rows
+
+static func _has_kind(level: Dictionary, kind: String) -> bool:
+	for d in level["interactables"]:
+		if str(d["kind"]) == kind:
+			return true
+	return false
