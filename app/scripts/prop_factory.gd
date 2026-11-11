@@ -270,6 +270,7 @@ static func make_clue_marker(kind: String) -> Node3D:
 		root.add_child(orb)
 	var beam := part(cylinder(0.11, 0.11, 9.0, 8), beam_material(), Vector3(0, 4.5, 0))
 	beam.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	beam.name = "Beam"   # world_controller hides it from afar on harder difficulties
 	root.add_child(beam)
 	var spark := CPUParticles3D.new()
 	spark.amount = 16

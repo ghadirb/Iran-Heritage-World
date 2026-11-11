@@ -2,7 +2,8 @@ extends Node3D
 class_name WorldController
 ## Builds each chapter from LevelData, runs interactions and mission flow.
 
-const INTERACT_RADIUS := 4.2
+var interact_radius := 4.2
+var beam_range := 9999.0
 
 @onready var hud: GameHUD = $HUD
 
@@ -104,7 +105,9 @@ func _start_level_async(index: int) -> void:
 func load_level(index: int, announce: bool = true) -> void:
 	level_index = clampi(index, 0, LevelData.LEVELS.size() - 1)
 	GameState.current_level = level_index
-	level = LevelData.LEVELS[level_index]
+	level = DifficultyRules.apply(LevelData.LEVELS[level_index], GameState.difficulty)
+	interact_radius = DifficultyRules.INTERACT_RADIUS[GameState.difficulty]
+	beam_range = DifficultyRules.BEAM_RANGE[GameState.difficulty]
 	level_active = false
 	finished = false
 	mistakes = 0
@@ -142,7 +145,10 @@ func load_level(index: int, announce: bool = true) -> void:
 	level_active = true
 	AudioManager.play_level(level)
 	var lid := str(level["id"])
-	hud.set_level_voice([lid + "__intro", lid + "__objective"] if announce else [lid + "__objective"])
+	var voice_keys: Array = [lid + "__intro", lid + "__objective"] if announce else [lid + "__objective"]
+	if bool(level.get("no_level_voice", false)):
+		voice_keys = []   # harder variants reword the text, so the recorded line would not match
+	hud.set_level_voice(voice_keys)
 	if announce:
 		hud.toast(str(level["intro"]), 7.0)
 
@@ -506,7 +512,7 @@ func _refresh_progress() -> void:
 
 func _nearest_item() -> Dictionary:
 	var best: Dictionary = {}
-	var best_d := INTERACT_RADIUS
+	var best_d := interact_radius
 	for it in items:
 		if bool(it["done"]) and str((it["data"] as Dictionary)["kind"]) != "brazier":
 			continue
@@ -600,7 +606,7 @@ func _use_brazier(it: Dictionary) -> void:
 				if fl:
 					fl.queue_free()
 		_refresh_progress()
-		hud.toast("ترتیب درست نبود؛ آتش‌ها خاموش شدند. سرخ، آبی، زرد، سبز.", 4.0)
+		hud.toast("ترتیب درست نبود؛ آتش‌ها خاموش شدند. %s" % str(level.get("order_hint", "سرخ، آبی، زرد، سبز.")), 5.0)
 
 func _check_finish() -> void:
 	if finished:
@@ -662,6 +668,10 @@ func _process(delta: float) -> void:
 				(ring as Node3D).rotation.y = t * 1.6
 				(ring as Node3D).rotation.x = 1.1
 			node.position.y = float(it["base_y"]) + sin(t * 2.0 + node.position.x) * 0.12
+		if kind == "clue" and beam_range < 1000.0:
+			var beam := node.get_node_or_null("Beam")
+			if beam:
+				(beam as Node3D).visible = player.global_position.distance_to(node.global_position) < beam_range
 	if simorgh:
 		simorgh.position.y = float(items[_simorgh_index()]["base_y"]) + sin(t * 1.1) * 0.35
 		PropFactory.animate_simorgh(simorgh, t)
@@ -725,36 +735,11 @@ func _report_missing_voice() -> void:
 func _run_selftest() -> void:
 	var failures := 0
 	_report_missing_voice()
-	for i in range(LevelData.LEVELS.size()):
-		load_level(i, false)
-		await get_tree().process_frame
-		await get_tree().physics_frame
-		for it in items:
-			if not bool((it["data"] as Dictionary).get("finale", false)):
-				it["done"] = true
-		if not _required_done():
-			failures += 1
-		# exercise every UI path once
-		for it in items:
-			var d: Dictionary = it["data"]
-			match str(d["kind"]):
-				"quiz":
-					hud.show_quiz(d, func(_a: bool, _b: bool) -> void: pass)
-					hud.close_all_modals()
-				"npc":
-					hud.show_dialogue(str(d["speaker"]), d["lines"], d.get("choices", []), d.get("after", []), func() -> void: pass)
-					hud.close_all_modals()
-		await get_tree().create_timer(0.3).timeout
-		# the player must stand on the terrain after a short settle
-		for _f in range(40):
-			await get_tree().physics_frame
-		var standing := player.is_on_floor()
-		print("level %d (%s): items=%d on_floor=%s y=%.2f" % [i, level["id"], items.size(), standing, player.global_position.y])
-		if not standing:
-			failures += 1
-		_finish_level()
-		hud.close_all_modals()
-		finished = false
+	for diff in range(3):
+		GameState.difficulty = diff
+		for i in range(LevelData.LEVELS.size()):
+			failures += await _selftest_level(i)
+	GameState.difficulty = 1
 	hud.show_main_menu()
 	hud.close_all_modals()
 	hud.show_pause_menu()
@@ -763,3 +748,61 @@ func _run_selftest() -> void:
 	hud.close_all_modals()
 	print("SELFTEST ", "OK" if failures == 0 else "FAILED (%d)" % failures)
 	get_tree().quit(0 if failures == 0 else 1)
+
+func _selftest_level(i: int) -> int:
+	var failures := 0
+	load_level(i, false)
+	await get_tree().process_frame
+	await get_tree().physics_frame
+	for it in items:
+		if not bool((it["data"] as Dictionary).get("finale", false)):
+			it["done"] = true
+	if not _required_done():
+		failures += 1
+	failures += _selftest_difficulty_sanity()
+	# exercise every UI path once
+	for it in items:
+		var d: Dictionary = it["data"]
+		match str(d["kind"]):
+			"quiz":
+				hud.show_quiz(d, func(_a: bool, _b: bool) -> void: pass)
+				hud.close_all_modals()
+			"npc":
+				hud.show_dialogue(str(d["speaker"]), d["lines"], d.get("choices", []), d.get("after", []), func() -> void: pass)
+				hud.close_all_modals()
+	await get_tree().create_timer(0.3).timeout
+	# the player must stand on the terrain after a short settle
+	for _f in range(40):
+		await get_tree().physics_frame
+	var standing := player.is_on_floor()
+	print("level %d (%s): items=%d on_floor=%s y=%.2f" % [i, level["id"], items.size(), standing, player.global_position.y])
+	if not standing:
+		failures += 1
+	_finish_level()
+	hud.close_all_modals()
+	finished = false
+	return failures
+
+## Harder variants must stay finishable: valid quiz answers, clues on real stones, nothing below the kill line.
+func _selftest_difficulty_sanity() -> int:
+	var bad := 0
+	for it in items:
+		var d: Dictionary = it["data"]
+		if str(d["kind"]) == "quiz":
+			var opts: Array = d["options"]
+			if int(d["answer"]) < 0 or int(d["answer"]) >= opts.size():
+				bad += 1
+		if d.has("on_chain") and int(d["on_chain"]) >= int((level["chain"] as Dictionary)["count"]):
+			bad += 1
+		var node: Node3D = it["node"]
+		if is_instance_valid(node) and node.global_position.y < kill_y + 2.0:
+			print("  unreachable item: ", d["id"])
+			bad += 1
+	var orders := []
+	for it in items:
+		if str((it["data"] as Dictionary)["kind"]) == "brazier":
+			orders.append(int((it["data"] as Dictionary)["order"]))
+	orders.sort()
+	if not orders.is_empty() and orders != [0, 1, 2, 3]:
+		bad += 1
+	return bad

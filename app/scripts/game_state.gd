@@ -21,6 +21,7 @@ var music_volume := 0.7              # 0..1
 var ambience_volume := 0.8           # wind + water
 var voice_mode := 2                  # 0 off, 1 manual button, 2 automatic (default)
 var voice_chosen := false            # true once the player changed it in settings
+var difficulty := 1                  # 0 easy, 1 medium, 2 challenge (see DifficultyRules)
 var quality_saved := false           # false on first run -> pick a safe default
 const GUARD_PATH := "user://loading.flag"
 var safe_mode_triggered := false
@@ -101,6 +102,7 @@ func load_game() -> void:
 	voice_chosen = bool(data.get("voice_chosen", false))
 	voice_mode = clampi(int(data.get("voice_mode", 2)), 0, 2) if voice_chosen else 2
 	shadows = bool(data.get("shadows", false))
+	difficulty = clampi(int(data.get("difficulty", 1)), 0, 2)
 
 func save_game() -> void:
 	var file := FileAccess.open(SAVE_PATH, FileAccess.WRITE)
@@ -113,6 +115,7 @@ func save_game() -> void:
 		"quality": quality,
 		"shadows": shadows,
 		"ui_scale": ui_scale_index,
+		"difficulty": difficulty,
 		"music_volume": music_volume,
 		"ambience_volume": ambience_volume,
 		"voice_mode": voice_mode,
@@ -125,6 +128,10 @@ func complete_level(index: int, star_count: int, knowledge_id: String) -> void:
 	unlocked_level = maxi(unlocked_level, index + 1)
 	if knowledge_id != "" and not knowledge.has(knowledge_id):
 		knowledge.append(knowledge_id)
+	save_game()
+
+func set_difficulty(value: int) -> void:
+	difficulty = clampi(value, 0, 2)
 	save_game()
 
 func set_quality(value: int) -> void:
