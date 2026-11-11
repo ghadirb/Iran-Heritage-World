@@ -154,9 +154,12 @@ func load_level(index: int, announce: bool = true) -> void:
 	level_active = true
 	AudioManager.play_level(level)
 	var lid := str(level["id"])
-	var voice_keys: Array = [lid + "__intro", lid + "__objective"] if announce else [lid + "__objective"]
-	if bool(level.get("no_level_voice", false)):
-		voice_keys = []   # harder variants reword the text, so the recorded line would not match
+	# A reworded (harder) variant has its own narration keys; missing files are simply skipped.
+	var intro_key := str(level.get("voice_intro", lid + "__intro"))
+	var objective_key := str(level.get("voice_objective", lid + "__objective"))
+	var voice_keys: Array = [objective_key]
+	if announce:
+		voice_keys = [intro_key, lid + "__intro_extra", objective_key] if level.has("intro_extra") else [intro_key, objective_key]
 	hud.set_level_voice(voice_keys)
 	if announce:
 		hud.toast((str(level["intro"]) + " " + str(level.get("intro_extra", ""))).strip_edges(), 8.0)
@@ -814,32 +817,22 @@ func _update_platform_checkpoint() -> void:
 # ---------- self test (CI) ----------
 
 func _report_missing_voice() -> void:
-	# Informational only: lists narration lines that have no audio file yet.
-	var missing := 0
-	var total := 0
-	for lv in LevelData.LEVELS:
-		var lid := str(lv["id"])
-		var keys: Array = ["intro", "objective", "knowledge"]
-		for d in lv["interactables"]:
-			var id := str(d["id"])
-			match str(d["kind"]):
-				"clue":
-					keys.append("hint_" + id)
-				"quiz":
-					keys.append_array([id + "_q", id + "_explain"])
-				"npc":
-					for i in range((d["lines"] as Array).size()):
-						keys.append("%s_L%d" % [id, i + 1])
-					for j in range((d.get("choices", []) as Array).size()):
-						keys.append("%s_R%d" % [id, j + 1])
-					for k in range((d.get("after", []) as Array).size()):
-						keys.append("%s_A%d" % [id, k + 1])
-		for key in keys:
-			total += 1
-			if AudioManager.voice_path("%s__%s" % [lid, key]) == "":
-				missing += 1
-				print("VOICE missing: %s__%s" % [lid, key])
-	print("VOICE coverage: %d/%d" % [total - missing, total])
+	# Informational only: lists narration lines that have no audio file yet (see VoiceLines).
+	var base_total := 0
+	var base_missing := 0
+	var new_total := 0
+	var new_missing := 0
+	for row in VoiceLines.all_lines():
+		var missing := AudioManager.voice_path(str(row["key"])) == ""
+		if bool(row["base"]):
+			base_total += 1
+			base_missing += 1 if missing else 0
+		else:
+			new_total += 1
+			new_missing += 1 if missing else 0
+		if missing:
+			print("VOICE missing: ", row["key"])
+	print("VOICE coverage: %d/%d (original) | new lines: %d/%d" % [base_total - base_missing, base_total, new_total - new_missing, new_total])
 
 func _run_selftest() -> void:
 	var failures := 0

@@ -48,7 +48,8 @@ static func apply(src: Dictionary, d: int) -> Dictionary:
 		var tx: Dictionary = CHALLENGE_TEXT[str(lv["id"])]
 		for k in tx:
 			lv[k] = tx[k]
-		lv["no_level_voice"] = true   # recorded narration reads the original wording
+			# Reworded text needs its own recording: documentation/voice-script.csv lists it (VoiceLines).
+			lv["voice_" + str(k)] = "%s__%s_d%d" % [str(lv["id"]), str(k), d]
 	var items: Array = lv["interactables"]
 	if d >= 2:
 		_add_extra_clues(lv, items)
@@ -161,7 +162,8 @@ static func _hide_fire_order(lv: Dictionary, items: Array, d: int) -> void:
 	lv["order_hint"] = riddle
 	lv["intro"] = "بر بلندای البرز رسیده‌ای. آتش‌ها را به ترتیب این سرنخ روشن کن: " + riddle
 	lv["objective"] = "آتش‌ها را به ترتیب سرنخ روشن کن؛ " + riddle + " سپس با سیمرغ سخن بگو."
-	lv["no_level_voice"] = true
+	lv["voice_intro"] = "%s__intro_d%d" % [str(lv["id"]), d]
+	lv["voice_objective"] = "%s__objective_d%d" % [str(lv["id"]), d]
 
 ## Firewood starts farther from the fires and more spread out, so carrying it is a real trip.
 static func _scatter_logs(lv: Dictionary, items: Array, d: int) -> void:

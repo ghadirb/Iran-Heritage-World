@@ -33,9 +33,14 @@ a faster player. Too easy ends the game in minutes; too hard makes a child quit:
    godot --headless --path app -- --selftest            # loads every level at all 3 difficulties
    ```
    Add a check to `_selftest_difficulty_sanity()` / a carry-style physics test for every new mechanic.
-3. **Voice narration**: recorded `.ogg` lines read the *original* text. If a difficulty variant changes
-   intro/objective text, set `lv["no_level_voice"] = true` (see `DifficultyRules`). Do not change
-   original `LevelData` text without updating `documentation/voice-script.csv` and the audio.
+3. **Voice narration**: every narrated sentence is listed by `VoiceLines.all_lines()` (single source of truth).
+   Recorded audio reads exact text, so: never edit existing `LevelData` text silently (it breaks the recording);
+   a reworded difficulty variant gets its own key (`<level>__intro_d1`, `__objective_d2`, set via `lv["voice_*"]` in
+   `DifficultyRules`); any new clue/quiz/NPC/`intro_extra` text is picked up by `VoiceLines` automatically.
+   After adding text, run `godot --headless --path app -s ../tools/export_voice_script.gd`, commit the regenerated
+   `documentation/voice-script.csv` and `voice-missing.csv` (the lines the owner must record). Missing audio is
+   never an error: the game stays silent for that line. Use only voices from `documentation/voice-characters.md`;
+   one character = one voice.
 4. **Content honesty**: myth and literature are labelled as such (`content_type`). Quiz questions and
    knowledge entries must come from the sourced content in-game or be reviewed; never invent history.
    See `documentation/historical-integrity.md`.
