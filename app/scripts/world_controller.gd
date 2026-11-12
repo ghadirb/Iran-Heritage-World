@@ -1173,6 +1173,9 @@ func _selftest_level(i: int) -> int:
 	await get_tree().physics_frame
 	if _has_logs():
 		failures += await _selftest_logs()
+	if level.has("chase"):
+		# Run the physical course before generic completion marks every goal done.
+		failures += await _selftest_chase()
 	for it in items:
 		if not bool((it["data"] as Dictionary).get("finale", false)):
 			it["done"] = true
@@ -1197,8 +1200,6 @@ func _selftest_level(i: int) -> int:
 		failures += await _selftest_scale()
 	if level.has("archery"):
 		failures += await _selftest_archery()
-	if level.has("chase"):
-		failures += await _selftest_chase()
 	await get_tree().create_timer(0.3).timeout
 	# the player must stand on the terrain after a short settle
 	for _f in range(40):
@@ -1356,7 +1357,8 @@ func _selftest_chase() -> int:
 			break
 		var target := chase.guide_point(player.global_position)
 		var dx := clampf((target.x - player.global_position.x) * 0.42, -0.85, 0.85)
-		GameState.move_vector = Vector2(dx, 1.0).normalized()
+		# PlayerController maps negative Y to forward / decreasing world Z.
+		GameState.move_vector = Vector2(dx, -1.0).normalized()
 		await get_tree().physics_frame
 	GameState.move_vector = Vector2.ZERO
 	var refuge_done := false
