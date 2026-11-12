@@ -160,8 +160,14 @@ func build_river() -> MeshInstance3D:
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
 	var z := z_max - 4.0
 	var rows := 0
+	var valid: Array[bool] = []
 	while z > z_min + 6.0:
 		var cx := river_x(z)
+		var over_gap := false
+		if cfg.has("chasm"):
+			var chd: Dictionary = cfg["chasm"]
+			over_gap = z < float(chd["z0"]) + 2.0 and z > float(chd["z1"]) - float(chd.get("edge", 2.0)) - 2.0
+		valid.append(not over_gap)
 		var y := base_height(z) - 0.38
 		for side in [0, 1]:
 			st.set_normal(Vector3.UP)
@@ -170,6 +176,8 @@ func build_river() -> MeshInstance3D:
 		rows += 1
 		z -= 2.0
 	for r in range(rows - 1):
+		if not (valid[r] and valid[r + 1]):
+			continue
 		var i := r * 2
 		st.add_index(i); st.add_index(i + 1); st.add_index(i + 2)
 		st.add_index(i + 1); st.add_index(i + 3); st.add_index(i + 2)

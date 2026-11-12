@@ -17,6 +17,7 @@ const MOVING_SPEED := [0.0, 0.8, 1.1]
 const CARRY_SPEED := [0.9, 0.8, 0.68]   # run-speed factor while carrying a log
 const LOG_FAR := [0.0, 22.0, 45.0]        # extra metres between logs and the fires
 const LOG_WIDE := [1.0, 1.6, 2.2]
+const BRIDGE_TRUNKS := [1, 1, 2]       # trunks that must reach the river bank (spares are always added)
 const SIDE_FACTORS := [1.0, 0.55, 0.9, 0.7]
 
 ## Challenge mode counts change, so these objective texts avoid numbers.

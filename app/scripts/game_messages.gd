@@ -12,6 +12,12 @@ const TEXT := {
 	"level_complete": "مرحله کامل شد!",
 	"quiz_correct": "درست!",
 	"quiz_wrong": "پاسخ درست نیست؛ دوباره فکر کن.",
+	# interaction is for conversation only; everything else is physical
+	"nothing_to_talk": "دکمه‌ی تعامل فقط برای گفت‌وگوست؛ به یک شخصیت یا پایه‌ی پرسش نزدیک شو.",
+	"log_carry": "هیزم برداشتی و کندتر می‌دوی. آن را تا آتشدان ببر.",
+	"bridge_built": "پل ساخته شد! از آن بگذر.",
+	"bridge_more": "یک تنه‌ی دیگر هم لازم است؛ آن را هم به لبه‌ی رود برسان.",
+	"trunk_lost": "تنه به رود افتاد؛ تنه‌ای تازه سر جای خود آمد.",
 }
 const FIRE_LIT := "%s روشن شد."
 const GO_FINALE := "همه‌ی بخش‌ها کامل شد. به سراغ «%s» برو."

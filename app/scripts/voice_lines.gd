@@ -90,7 +90,7 @@ static func all_lines() -> Array:
 	for level in LevelData.LEVELS:
 		var lid := str(level["id"])
 		if level.has("intro_extra"):
-			_row(rows, seen, lid, "intro_extra", "جمله‌ی راهنمای مکانیک (بعد از معرفی)", "راوی", str(level["intro_extra"]), 1, false)
+			_row(rows, seen, lid, str(level.get("intro_extra_key", "intro_extra")), "جمله‌ی راهنمای مکانیک (بعد از معرفی)", "راوی", str(level["intro_extra"]), 1, false)
 		var base_ids: Array = []
 		for d in level["interactables"]:
 			base_ids.append(str(d["id"]))

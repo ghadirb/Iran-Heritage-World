@@ -253,6 +253,20 @@ static func make_flame(color: Color) -> Node3D:
 # ---------- collectibles ----------
 
 ## A piece of firewood the player can pick up and carry (see WorldController._pick_log).
+static func make_trunk() -> Node3D:
+	var root := Node3D.new()
+	var bark := mat(Color("#6a4a2c"), 1.0)
+	var body := part(cylinder(0.5, 0.5, 2.6, 12), bark)
+	body.rotation.z = PI * 0.5
+	root.add_child(body)
+	for s in [-1.0, 1.0]:
+		var cap := part(cylinder(0.46, 0.46, 0.06, 12), mat(Color("#c9a26b"), 0.9), Vector3(s * 1.3, 0, 0))
+		cap.rotation.z = PI * 0.5
+		root.add_child(cap)
+	for k in range(3):
+		root.add_child(part(box(Vector3(0.5, 0.08, 0.1)), mat(Color("#4a3320"), 1.0), Vector3(-0.8 + 0.8 * float(k), 0.5, 0.0)))
+	return root
+
 static func make_log() -> Node3D:
 	var root := Node3D.new()
 	var body := part(cylinder(0.22, 0.22, 1.4, 8), mat(Color("#6b4a2b"), 0.95), Vector3(0, 0.25, 0))

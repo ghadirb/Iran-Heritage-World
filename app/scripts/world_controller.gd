@@ -2,6 +2,8 @@ extends Node3D
 class_name WorldController
 ## Builds each chapter from LevelData, runs interactions and mission flow.
 
+const TALK_KINDS := ["npc", "quiz"]
+const AUTO_RADIUS := {"clue": 1.9, "log": 1.7, "brazier": 2.6}
 var interact_radius := 4.2
 var beam_range := 9999.0
 
@@ -30,6 +32,12 @@ var moving_stones: Dictionary = {}   # chain index -> {"body": AnimatableBody3D,
 var chain_time := 0.0
 var carrying: Dictionary = {}       # the log item the player holds (empty = nothing)
 var base_run_speed := 6.2
+var trunks: Array[RigidBody3D] = []   # pushable tree trunks (bridge levels)
+var bridge_need := 0
+var bridge_delivered := 0
+var bridge_built := false
+var bridge_slot: Area3D
+var _hint_trunk_shown := false
 
 func _ready() -> void:
 	selftest = OS.get_cmdline_user_args().has("--selftest")
@@ -124,6 +132,12 @@ func load_level(index: int, announce: bool = true) -> void:
 	moving_stones.clear()
 	chain_time = 0.0
 	carrying = {}
+	trunks.clear()
+	bridge_need = 0
+	bridge_delivered = 0
+	bridge_built = false
+	bridge_slot = null
+	_hint_trunk_shown = false
 	player.run_speed = base_run_speed
 	items.clear()
 	grass_instances.clear()
@@ -141,6 +155,8 @@ func load_level(index: int, announce: bool = true) -> void:
 	_build_vegetation()
 	_build_decor()
 	_build_interactables()
+	if level.has("bridge"):
+		_build_bridge()
 	_build_ambient_particles()
 	var sp: Vector2 = level["spawn"]
 	var sx := terrain.path_x(sp.y) + sp.x
@@ -163,7 +179,7 @@ func load_level(index: int, announce: bool = true) -> void:
 	var objective_key := str(level.get("voice_objective", lid + "__objective"))
 	var voice_keys: Array = [objective_key]
 	if announce:
-		voice_keys = [intro_key, lid + "__intro_extra", objective_key] if level.has("intro_extra") else [intro_key, objective_key]
+		voice_keys = [intro_key, lid + "__" + str(level.get("intro_extra_key", "intro_extra")), objective_key] if level.has("intro_extra") else [intro_key, objective_key]
 	hud.set_level_voice(voice_keys)
 	if announce:
 		hud.toast((str(level["intro"]) + " " + str(level.get("intro_extra", ""))).strip_edges(), 8.0)
@@ -292,7 +308,7 @@ func _build_ground() -> void:
 func _build_vegetation() -> void:
 	var tree_count := int(level["trees"])
 	if tree_count > 0:
-		var pts := terrain.scatter_points(tree_count, 5.0, float(level["valley_half"]) + 22.0)
+		var pts := terrain.scatter_points(tree_count, maxf(5.0, float(level.get("lane_clear", 0.0))), float(level["valley_half"]) + 22.0)
 		var trees := terrain.build_multimesh(terrain.make_pine_mesh(), terrain.solid_vertex_material(0.95), pts, 0.85, 1.7)
 		level_root.add_child(trees)
 		var tb := StaticBody3D.new()
@@ -308,7 +324,7 @@ func _build_vegetation() -> void:
 	var rock_count := int(level["rocks"])
 	if rock_count > 0:
 		for variant in range(3):
-			var rp := terrain.scatter_points(rock_count / 3, 3.0, float(level["valley_half"]) + 20.0, false)
+			var rp := terrain.scatter_points(rock_count / 3, maxf(3.0, float(level.get("lane_clear", 0.0))), float(level["valley_half"]) + 20.0, false)
 			var rmat := terrain.solid_vertex_material(1.0)
 			rmat.albedo_color = Color(str(level["rock"])).lightened(0.05 * float(variant))
 			var rocks := terrain.build_multimesh(terrain.make_rock_mesh(variant), rmat, rp, 0.8, 3.2)
@@ -568,8 +584,11 @@ func _nearest_item(only_kind: String = "") -> Dictionary:
 	for it in items:
 		if bool(it["done"]) and str((it["data"] as Dictionary)["kind"]) != "brazier":
 			continue
-		if only_kind != "" and str((it["data"] as Dictionary)["kind"]) != only_kind:
+		var kind_here := str((it["data"] as Dictionary)["kind"])
+		if only_kind != "" and kind_here != only_kind:
 			continue
+		if only_kind == "" and kind_here not in TALK_KINDS:
+			continue   # the interact button is for conversation only
 		var node: Node3D = it["node"]
 		if not is_instance_valid(node):
 			continue
@@ -582,32 +601,15 @@ func _nearest_item(only_kind: String = "") -> Dictionary:
 	return best
 
 func _interact() -> void:
+	## Interact is for conversation only (NPCs and question pedestals).
 	if not level_active or hud.is_modal_open():
-		return
-	if not carrying.is_empty():
-		# Holding firewood: interact at a fire to place it, anywhere else to put it down.
-		var fire := _nearest_item("brazier")
-		if fire.is_empty():
-			_drop_log()
-		else:
-			_use_brazier(fire)
 		return
 	var it := _nearest_item()
 	if it.is_empty():
-		_msg("nothing_near", 3.0)
+		_msg("nothing_to_talk", 3.0)
 		return
 	var d: Dictionary = it["data"]
 	match str(d["kind"]):
-		"clue":
-			_collect(it)
-			hud.toast(str(d["hint"]), 4.0)
-			if GameState.voice_mode == 2:
-				AudioManager.play_voice("%s__hint_%s" % [str(level["id"]), str(d["id"])])
-			_check_finish()
-		"log":
-			_pick_log(it)
-		"brazier":
-			_use_brazier(it)
 		"quiz":
 			hud.show_quiz(d, func(correct: bool, finished_q: bool) -> void:
 				if not correct:
@@ -623,6 +625,46 @@ func _interact() -> void:
 			hud.show_dialogue(str(d["speaker"]), d["lines"], d.get("choices", []), d.get("after", []), func() -> void:
 				_mark_done(it)
 				_finish_level(), str(d["id"]))
+
+## Physical actions: walking into things picks them up / delivers them. Edge-triggered
+## (fires when the player ENTERS the radius) so nothing repeats while standing still.
+func _auto_actions() -> void:
+	if not level_active or hud.is_modal_open():
+		return
+	for it in items:
+		var d: Dictionary = it["data"]
+		var kind := str(d["kind"])
+		if not AUTO_RADIUS.has(kind):
+			continue
+		var node: Node3D = it["node"]
+		if not is_instance_valid(node):
+			it["inside"] = false
+			continue
+		var a := player.global_position
+		var b := node.global_position
+		var inside := Vector2(a.x - b.x, a.z - b.z).length() < float(AUTO_RADIUS[kind]) and absf(a.y - b.y) < 3.2
+		var was := bool(it.get("inside", false))
+		it["inside"] = inside
+		if not inside or was:
+			continue
+		match kind:
+			"clue":
+				if not bool(it["done"]):
+					_collect(it)
+					hud.toast(str(d["hint"]), 4.0)
+					if GameState.voice_mode == 2:
+						AudioManager.play_voice("%s__hint_%s" % [str(level["id"]), str(d["id"])])
+					_check_finish()
+			"log":
+				if not bool(it["done"]) and carrying.is_empty():
+					_pick_log(it)
+			"brazier":
+				if bool(it["done"]):
+					continue
+				if not carrying.is_empty() or not _has_logs():
+					_use_brazier(it)
+				else:
+					_msg("need_log", 3.5)
 
 func _collect(it: Dictionary) -> void:
 	var node: Node3D = it["node"]
@@ -670,7 +712,7 @@ func _pick_log(it: Dictionary) -> void:
 	node.position = Vector3(0, 2.3, 0)
 	node.rotation = Vector3.ZERO
 	player.run_speed = base_run_speed * float(DifficultyRules.CARRY_SPEED[GameState.difficulty])
-	_msg("log_pick", 4.5)
+	_msg("log_carry", 4.5)
 
 func _release_log() -> void:
 	carrying = {}
@@ -774,6 +816,8 @@ func _process(delta: float) -> void:
 		_respawn()
 	if level.has("chain") and player.is_on_floor():
 		_update_platform_checkpoint()
+	_auto_actions()
+	_update_bridge()
 	var near := _nearest_item()
 	hud.set_interact_ready(not near.is_empty())
 	var river_dist := -1.0
@@ -889,6 +933,8 @@ func _selftest_level(i: int) -> int:
 				hud.close_all_modals()
 	if not moving_stones.is_empty():
 		failures += await _selftest_carry()
+	if level.has("bridge"):
+		failures += await _selftest_bridge()
 	await get_tree().create_timer(0.3).timeout
 	# the player must stand on the terrain after a short settle
 	for _f in range(40):
@@ -902,7 +948,8 @@ func _selftest_level(i: int) -> int:
 	finished = false
 	return failures
 
-## Firewood flow: no wood = no fire; correct fire burns it; wrong fire returns it; drop works.
+## Firewood flow (automatic, no interact button): no wood = no fire; the correct fire burns the wood;
+## a wrong fire returns it and resets the order.
 func _selftest_logs() -> int:
 	var bad := 0
 	var logs: Array = []
@@ -913,33 +960,79 @@ func _selftest_logs() -> int:
 			logs.append(it)
 		elif str(d["kind"]) == "brazier":
 			fires[int(d["order"])] = it
+	var far := Vector3(player.global_position.x, player.global_position.y, player.global_position.z + 40.0)
 	player.global_position = (fires[0]["node"] as Node3D).global_position + Vector3(1.0, 0.5, 0)
-	_interact()   # no wood: must NOT light the fire
+	_auto_actions()   # no wood: must NOT light the fire
 	if bool(fires[0]["done"]) or brazier_next != 0:
 		bad += 1
 	player.global_position = (logs[0]["node"] as Node3D).global_position + Vector3(0.8, 0.5, 0)
-	_interact()   # pick up
+	_auto_actions()   # walk onto the log: picked up
 	if carrying.is_empty() or player.run_speed >= base_run_speed:
 		bad += 1
 	player.global_position = (fires[2]["node"] as Node3D).global_position + Vector3(1.0, 0.5, 0)
-	_interact()   # wrong fire: wood returns, fires reset
+	_auto_actions()   # wrong fire: wood returns, fires reset
 	if not carrying.is_empty() or bool(logs[0]["done"]) or brazier_next != 0:
 		bad += 1
+	player.global_position = far
+	_auto_actions()
 	player.global_position = (logs[0]["node"] as Node3D).global_position + Vector3(0.8, 0.5, 0)
-	_interact()
-	player.global_position = Vector3(player.global_position.x, player.global_position.y, player.global_position.z + 12.0)
-	_interact()   # far from any fire: drop
-	if not carrying.is_empty() or player.run_speed != base_run_speed:
-		bad += 1
-	player.global_position = (logs[0]["node"] as Node3D).global_position + Vector3(0.8, 0.5, 0)
-	_interact()
+	_auto_actions()
 	player.global_position = (fires[0]["node"] as Node3D).global_position + Vector3(1.0, 0.5, 0)
-	_interact()   # right fire: lit, wood burned
+	_auto_actions()   # right fire: lit, wood burned
 	if not bool(fires[0]["done"]) or brazier_next != 1 or not carrying.is_empty():
 		bad += 1
+	# the interact button must NOT do any of the physical actions
+	_interact()
 	print("  log flow: %s" % ("ok" if bad == 0 else "FAILED (%d)" % bad))
 	player.global_position = spawn_point
 	return bad
+
+## Pushing a trunk into the slot builds the bridge, and the player can then walk across it.
+func _selftest_bridge() -> int:
+	var gap := _gap_info()
+	var need := bridge_need
+	var guard := 0
+	while bridge_delivered < need and guard < need + 2:
+		guard += 1
+		if trunks.is_empty():
+			break
+		var rb: RigidBody3D = trunks[0]
+		var start_z := rb.global_position.z + 2.1
+		player.global_position = Vector3(rb.global_position.x, terrain.height(rb.global_position.x, start_z) + 0.6, start_z)
+		player.velocity = Vector3.ZERO
+		var before := bridge_delivered
+		for _f in range(900):
+			await get_tree().physics_frame
+			if not is_instance_valid(rb) or bridge_delivered > before:
+				break
+			GameState.move_vector = Vector2(clampf((rb.global_position.x - player.global_position.x) * 0.8, -1.0, 1.0), -1.0)
+		GameState.move_vector = Vector2.ZERO
+		if bridge_delivered <= before:
+			print("  bridge: trunk %d never reached the bank (z=%.1f)" % [guard, rb.global_position.z if is_instance_valid(rb) else 0.0])
+			return 1
+	if not bridge_built:
+		print("  bridge: not built after delivering %d trunks" % bridge_delivered)
+		return 1
+	# walk across
+	var mid := float(gap["mid"])
+	var target := Vector2(terrain.path_x(float(gap["far"]) - 6.0), float(gap["far"]) - 6.0)
+	var near_pos := Vector2(terrain.path_x(float(gap["near"]) + 3.0), float(gap["near"]) + 3.0)
+	player.global_position = Vector3(near_pos.x, terrain.height(near_pos.x, near_pos.y) + 0.6, near_pos.y)
+	player.velocity = Vector3.ZERO
+	var crossed := false
+	for _f in range(900):
+		await get_tree().physics_frame
+		var d := target - Vector2(player.global_position.x, player.global_position.z)
+		if d.length() < 1.5 and player.is_on_floor():
+			crossed = true
+			break
+		if player.global_position.y < kill_y:
+			break
+		GameState.move_vector = d.normalized()
+	GameState.move_vector = Vector2.ZERO
+	print("  bridge: need=%d built=%s crossed=%s" % [need, bridge_built, crossed])
+	player.global_position = spawn_point
+	return 0 if crossed else 1
 
 ## A player standing on a sliding stone must be carried along, not left behind.
 func _selftest_carry() -> int:
@@ -1044,3 +1137,138 @@ func _ground_ends_ahead(dir: Vector2) -> bool:
 	var query := PhysicsRayQueryParameters3D.create(from, from + Vector3(0, -2.5, 0))
 	query.exclude = [player.get_rid()]
 	return get_world_3d().direct_space_state.intersect_ray(query).is_empty()
+
+# ---------- river bridge (push a tree trunk to the bank) ----------
+
+func _gap_info() -> Dictionary:
+	var ch: Dictionary = level["chasm"]
+	var near_z := float(ch["z0"])
+	var far_z := float(ch["z1"]) - float(ch.get("edge", 2.0))
+	return {"near": near_z, "far": far_z, "mid": (near_z + far_z) * 0.5}
+
+func _build_bridge() -> void:
+	var br: Dictionary = level["bridge"]
+	var gap := _gap_info()
+	bridge_need = int(DifficultyRules.BRIDGE_TRUNKS[GameState.difficulty])
+	var spawn_list: Array = br["trunks"]
+	var count := mini(bridge_need + 2, spawn_list.size())
+	var pm := PhysicsMaterial.new()
+	pm.friction = 1.0
+	pm.rough = true
+	for i in range(count):
+		var off: Vector2 = spawn_list[i]
+		var z := off.y
+		var x := terrain.path_x(z) + off.x
+		var rb := RigidBody3D.new()
+		rb.name = "Trunk%d" % i
+		rb.mass = 30.0
+		rb.linear_damp = 1.6
+		rb.angular_damp = 2.2
+		rb.continuous_cd = true
+		rb.physics_material_override = pm
+		rb.add_to_group("pushable")
+		var cs := CollisionShape3D.new()
+		var cyl := CylinderShape3D.new()
+		cyl.radius = 0.5
+		cyl.height = 2.6
+		cs.shape = cyl
+		cs.rotation.z = PI * 0.5
+		rb.add_child(cs)
+		rb.add_child(PropFactory.make_trunk())
+		level_root.add_child(rb)
+		rb.global_position = Vector3(x, terrain.height(x, z) + 0.9, z)
+		rb.set_meta("home", rb.global_position)
+		trunks.append(rb)
+	# detection zone on the near bank
+	var px := terrain.path_x(float(gap["near"]) + 3.0)
+	var by := terrain.height(px, float(gap["near"]) + 3.0)
+	bridge_slot = Area3D.new()
+	bridge_slot.name = "BridgeSlot"
+	var slot_shape := CollisionShape3D.new()
+	var box := BoxShape3D.new()
+	box.size = Vector3(18.0, 4.0, 4.5)
+	slot_shape.shape = box
+	bridge_slot.add_child(slot_shape)
+	bridge_slot.position = Vector3(px, by + 1.0, float(gap["near"]) + 2.6)
+	level_root.add_child(bridge_slot)
+	bridge_slot.body_entered.connect(_on_slot_body)
+	# water at the bottom of the gap (falling in = respawn)
+	var water := MeshInstance3D.new()
+	var plane := PlaneMesh.new()
+	plane.size = Vector2(170.0, absf(float(gap["near"]) - float(gap["far"])) + 6.0)
+	water.mesh = plane
+	var wmat := ShaderMaterial.new()
+	wmat.shader = load("res://shaders/water.gdshader")
+	water.material_override = wmat
+	water.position = Vector3(0.0, float(br.get("water_y", -2.3)), float(gap["mid"]))
+	water.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	level_root.add_child(water)
+
+func _on_slot_body(body: Node3D) -> void:
+	if bridge_built or not (body is RigidBody3D) or not trunks.has(body as RigidBody3D):
+		return
+	var rb := body as RigidBody3D
+	trunks.erase(rb)
+	var burst := PropFactory.make_burst(Color("#c9a26b"))
+	burst.position = rb.global_position
+	level_root.add_child(burst)
+	get_tree().create_timer(2.0).timeout.connect(burst.queue_free)
+	rb.queue_free()
+	bridge_delivered += 1
+	if bridge_delivered >= bridge_need:
+		_build_deck()
+		_msg("bridge_built", 5.0)
+	else:
+		_msg("bridge_more", 4.0)
+
+func _build_deck() -> void:
+	bridge_built = true
+	var gap := _gap_info()
+	var near_z := float(gap["near"])
+	var far_z := float(gap["far"])
+	var mid := float(gap["mid"])
+	var length := absf(near_z - far_z) + 4.0
+	var px := terrain.path_x(mid)
+	var top := maxf(terrain.height(terrain.path_x(near_z + 1.0), near_z + 1.0), terrain.height(terrain.path_x(far_z - 1.0), far_z - 1.0)) + 0.03
+	var width := 5.0
+	var deck := StaticBody3D.new()
+	deck.name = "BridgeDeck"
+	var cs := CollisionShape3D.new()
+	var bx := BoxShape3D.new()
+	bx.size = Vector3(width, 0.5, length)
+	cs.shape = bx
+	cs.position = Vector3(px, top - 0.25, mid)
+	deck.add_child(cs)
+	var bark := PropFactory.mat(Color("#6a4a2c"), 1.0)
+	var planks := PropFactory.mat(Color("#a9815a"), 0.95)
+	deck.add_child(PropFactory.part(PropFactory.box(Vector3(width, 0.18, length)), planks, Vector3(px, top - 0.09, mid)))
+	for s in [-1.0, 1.0]:
+		var rail := PropFactory.part(PropFactory.cylinder(0.3, 0.3, length, 10), bark, Vector3(px + s * (width * 0.5), top - 0.05, mid))
+		rail.rotation.x = PI * 0.5
+		deck.add_child(rail)
+	for k in range(bridge_need + 1):
+		var z := near_z - 1.5 - float(k) * (length - 3.0) / float(maxi(bridge_need, 1))
+		deck.add_child(PropFactory.part(PropFactory.box(Vector3(width + 0.6, 0.12, 0.35)), bark, Vector3(px, top + 0.02, z)))
+	level_root.add_child(deck)
+	for rb in trunks:
+		rb.queue_free()   # spares are no longer needed
+	trunks.clear()
+
+func _update_bridge() -> void:
+	if not level.has("bridge"):
+		return
+	var gap := _gap_info()
+	# a trunk that fell into the river returns to where it started (the level stays finishable)
+	for rb in trunks:
+		if is_instance_valid(rb) and rb.global_position.y < kill_y + 1.0:
+			rb.linear_velocity = Vector3.ZERO
+			rb.angular_velocity = Vector3.ZERO
+			rb.global_position = rb.get_meta("home")
+			_msg("trunk_lost", 3.0)
+		elif is_instance_valid(rb) and not _hint_trunk_shown and rb.global_position.distance_to(player.global_position) < 3.2:
+			_hint_trunk_shown = true
+	# respawn at solid ground on either bank, never inside the gap
+	if player.is_on_floor():
+		var z := player.global_position.z
+		if z > float(gap["near"]) + 2.0 or z < float(gap["far"]) - 2.0:
+			checkpoint = player.global_position + Vector3(0, 0.4, 0)

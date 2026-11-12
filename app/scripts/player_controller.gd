@@ -101,6 +101,7 @@ func _physics_process(delta: float) -> void:
 		coyote = 0.0
 		jumped.emit()
 	move_and_slide()
+	_push_bodies(delta)
 
 func _register_keys() -> void:
 	_add_key("move_forward", [KEY_W, KEY_UP])
@@ -120,3 +121,21 @@ func _add_key(action_name: StringName, keys: Array) -> void:
 		var event := InputEventKey.new()
 		event.physical_keycode = key
 		InputMap.action_add_event(action_name, event)
+
+
+## Walking into a heavy body (tree trunk) rolls it away from the player.
+func _push_bodies(delta: float) -> void:
+	for i in range(get_slide_collision_count()):
+		var c := get_slide_collision(i)
+		var body := c.get_collider() as RigidBody3D
+		if body == null or not body.is_in_group("pushable"):
+			continue
+		var n := c.get_normal()
+		var dir := Vector3(-n.x, 0.0, -n.z)
+		if dir.length() < 0.2:
+			continue
+		dir = dir.normalized()
+		var want := dir * run_speed * 0.8
+		body.sleeping = false
+		body.linear_velocity.x = move_toward(body.linear_velocity.x, want.x, 40.0 * delta)
+		body.linear_velocity.z = move_toward(body.linear_velocity.z, want.z, 40.0 * delta)
