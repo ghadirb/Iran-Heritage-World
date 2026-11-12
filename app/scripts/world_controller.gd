@@ -56,6 +56,7 @@ var shoot_cooldown := 0.0
 var archery_time := 0.0
 var arrows_fired := 0
 var bow_node: Node3D
+var chase: ChaseController
 
 func _ready() -> void:
 	selftest = OS.get_cmdline_user_args().has("--selftest")
@@ -169,6 +170,7 @@ func load_level(index: int, announce: bool = true) -> void:
 	scale_door_col = null
 	targets.clear()
 	arrows.clear()
+	chase = null
 	shoot_cooldown = 0.0
 	archery_time = 0.0
 	arrows_fired = 0
@@ -200,6 +202,8 @@ func load_level(index: int, announce: bool = true) -> void:
 		_build_scale_gate()
 	if level.has("archery"):
 		_build_archery()
+	if level.has("chase"):
+		_build_chase()
 	_setup_bow()
 	_build_ambient_particles()
 	var sp: Vector2 = level["spawn"]
@@ -209,6 +213,8 @@ func load_level(index: int, announce: bool = true) -> void:
 	player.global_position = spawn_point
 	player.velocity = Vector3.ZERO
 	player.snap_camera_behind(0.0)
+	if chase:
+		chase.reset(spawn_point)
 	player.input_enabled = true
 	hud.close_all_modals()
 	hud.set_level_info(str(level["title"]), str(level["subtitle"]))
@@ -534,6 +540,27 @@ func _build_archery() -> void:
 		var moves := amp > 0.0 and i % 2 == 1   # every second target slides sideways (challenge only)
 		targets.append({"node": node, "base": node.position, "amp": amp if moves else 0.0, "speed": spd, "phase": float(i) * 1.9, "radius": radius, "item": it, "hit": false})
 
+# ---------- chase (chapter 8): run through the glowing gaps before the mist reaches you ----------
+
+func _build_chase() -> void:
+	chase = ChaseController.new()
+	chase.build(level_root, terrain, level, GameState.difficulty)
+
+func _update_chase(delta: float) -> void:
+	if chase == null:
+		return
+	var result := chase.step(delta, player.global_position)
+	if result == "caught":
+		mistakes += 1
+		_msg("chase_caught", 3.0)
+		_respawn(false)
+	elif result == "escaped":
+		for it in items:
+			if str((it["data"] as Dictionary)["kind"]) == "escape" and not bool(it["done"]):
+				_mark_done(it)
+		_msg("chase_safe", 3.5)
+		_check_finish()
+
 func _aim_ray() -> Dictionary:
 	var cam := player.camera
 	return {"origin": cam.global_position, "dir": -cam.global_transform.basis.z}
@@ -673,6 +700,7 @@ func _physics_process(delta: float) -> void:
 	if not level_active:
 		return
 	_update_archery(delta)
+	_update_chase(delta)
 	if moving_stones.is_empty():
 		return
 	chain_time += delta
@@ -756,6 +784,9 @@ func _build_interactables() -> void:
 				node = PropFactory.make_pedestal()
 			"scale":
 				node = Node3D.new()   # logical anchor; the pans, beam and gate are built by _build_scale_gate()
+			"escape":
+				node = PropFactory.make_clue_marker("clue")
+				pos += Vector3(0, 0.9, 0)
 			"npc":
 				match str(data["id"]):
 					"simorgh":
@@ -1079,10 +1110,13 @@ func _simorgh_index() -> int:
 			return i
 	return 0
 
-func _respawn() -> void:
+func _respawn(show_fall_message: bool = true) -> void:
 	player.global_position = checkpoint
 	player.velocity = Vector3.ZERO
-	_msg("fall", 3.0)
+	if chase:
+		chase.reset(checkpoint)
+	if show_fall_message:
+		_msg("fall", 3.0)
 
 func _update_platform_checkpoint() -> void:
 	var ch: Dictionary = level["chain"]
@@ -1163,6 +1197,8 @@ func _selftest_level(i: int) -> int:
 		failures += await _selftest_scale()
 	if level.has("archery"):
 		failures += await _selftest_archery()
+	if level.has("chase"):
+		failures += await _selftest_chase()
 	await get_tree().create_timer(0.3).timeout
 	# the player must stand on the terrain after a short settle
 	for _f in range(40):
@@ -1306,6 +1342,32 @@ func _selftest_archery() -> int:
 	print("  archery: targets=%d arrows=%d all_hit=%s mistakes=%d" % [targets.size(), arrows_fired, done_all, _archery_mistakes()])
 	return bad
 
+## The bot follows each glowing gap like a child can. It proves that all three
+## difficulty variants reach the static refuge before the pursuer catches them.
+func _selftest_chase() -> int:
+	if chase == null:
+		print("  chase: controller missing")
+		return 1
+	var escaped := false
+	var mistakes_before := mistakes
+	for _frame in range(2600):
+		if chase.escaped:
+			escaped = true
+			break
+		var target := chase.guide_point(player.global_position)
+		var dx := clampf((target.x - player.global_position.x) * 0.42, -0.85, 0.85)
+		GameState.move_vector = Vector2(dx, 1.0).normalized()
+		await get_tree().physics_frame
+	GameState.move_vector = Vector2.ZERO
+	var refuge_done := false
+	for it in items:
+		if str((it["data"] as Dictionary)["kind"]) == "escape":
+			refuge_done = bool(it["done"])
+	print("  chase: difficulty=%d escaped=%s refuge=%s mistakes=%d" % [GameState.difficulty, escaped, refuge_done, mistakes])
+	player.global_position = spawn_point
+	player.velocity = Vector3.ZERO
+	return 0 if escaped and refuge_done and mistakes == mistakes_before else 1
+
 func _target_at(t: Dictionary, ahead: float) -> Vector3:
 	var b: Vector3 = t["base"]
 	if float(t["amp"]) == 0.0:
@@ -1357,6 +1419,15 @@ func _selftest_difficulty_sanity() -> int:
 		for mi in (chd.get("moving", []) as Array):
 			if int(mi) <= 0 or int(mi) >= int(chd["count"]) - 1 or not moving_stones.has(int(mi)):
 				bad += 1
+	if level.has("chase"):
+		var cd: Dictionary = level["chase"]
+		var gates: Array = cd.get("gates", [])
+		if float(cd.get("speed", 0.0)) <= 0.0 or float(cd.get("gap_width", 0.0)) < 4.5:
+			bad += 1
+		if int(cd.get("gate_count", 0)) < 1 or int(cd.get("gate_count", 0)) > gates.size():
+			bad += 1
+		if float(cd.get("finish_z", 0.0)) >= -8.0:
+			bad += 1
 	var orders := []
 	for it in items:
 		if str((it["data"] as Dictionary)["kind"]) == "brazier":

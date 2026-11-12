@@ -294,6 +294,37 @@ static func make_bow() -> Node3D:
 	root.add_child(part(box(Vector3(0.012, 1.25, 0.012)), mat(Color("#efe6d2"), 0.9), Vector3(0, 0, 0.0)))
 	return root
 
+## Non-violent, stylised pressure cue for the chase course. It has no collider.
+static func make_mist_chaser() -> Node3D:
+	var root := Node3D.new()
+	root.name = "MistShadow"
+	var mist := mat(Color(0.20, 0.31, 0.43, 0.68), 0.8, 0.0, 1.1)
+	for i in range(4):
+		var puff := part(sphere(0.7 + float(i) * 0.1, 10), mist, Vector3((float(i) - 1.5) * 0.35, 0.2 + float(i % 2) * 0.35, 0.0), Vector3(1.0, 1.2, 1.0))
+		root.add_child(puff)
+	var eye_mat := mat(Color("#d9f6ff"), 0.2, 0.0, 2.2)
+	for side in [-1.0, 1.0]:
+		root.add_child(part(sphere(0.09, 8), eye_mat, Vector3(side * 0.24, 0.65, -0.62)))
+	var trail := CPUParticles3D.new()
+	trail.amount = 14
+	trail.lifetime = 1.3
+	trail.direction = Vector3(0, 0.3, 1)
+	trail.spread = 35.0
+	trail.initial_velocity_min = 0.25
+	trail.initial_velocity_max = 0.7
+	trail.gravity = Vector3(0, 0.1, 0)
+	var quad := QuadMesh.new()
+	quad.size = Vector2(0.42, 0.42)
+	trail.mesh = quad
+	var pm := StandardMaterial3D.new()
+	pm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	pm.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
+	pm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	pm.albedo_color = Color(0.55, 0.75, 0.9, 0.28)
+	trail.material_override = pm
+	root.add_child(trail)
+	return root
+
 ## A piece of firewood the player can pick up and carry (see WorldController._pick_log).
 static func make_trunk() -> Node3D:
 	var root := Node3D.new()

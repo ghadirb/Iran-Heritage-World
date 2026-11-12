@@ -19,6 +19,11 @@ const LOG_FAR := [0.0, 22.0, 45.0]        # extra metres between logs and the fi
 const LOG_WIDE := [1.0, 1.6, 2.2]
 const BRIDGE_TRUNKS := [1, 1, 2]       # trunks that must reach the river bank (spares are always added)
 const SIDE_FACTORS := [1.0, 0.55, 0.9, 0.7]
+const CHASE_SPEED := [4.7, 5.5, 6.0]
+const CHASE_START_GAP := [30.0, 25.0, 22.0]
+const CHASE_GATE_COUNT := [3, 4, 5]
+const CHASE_GAP_WIDTH := [8.0, 6.6, 5.4]
+const CHASE_CATCH_RADIUS := [2.0, 2.25, 2.5]
 
 ## Challenge mode counts change, so these objective texts avoid numbers.
 const CHALLENGE_TEXT := {
@@ -65,7 +70,19 @@ static func apply(src: Dictionary, d: int) -> Dictionary:
 	_hide_fire_order(lv, items, d)
 	_scatter_logs(lv, items, d)
 	_shuffle_quiz_options(items)
+	_apply_chase(lv, d)
 	return lv
+
+## Same route, harder pursuit: less lead, more gates, and narrower safe gaps.
+static func _apply_chase(lv: Dictionary, d: int) -> void:
+	if not lv.has("chase"):
+		return
+	var chase: Dictionary = lv["chase"]
+	chase["speed"] = CHASE_SPEED[d]
+	chase["start_gap"] = CHASE_START_GAP[d]
+	chase["gate_count"] = CHASE_GATE_COUNT[d]
+	chase["gap_width"] = CHASE_GAP_WIDTH[d]
+	chase["catch_radius"] = CHASE_CATCH_RADIUS[d]
 
 ## Clues that sit right on the path are easy to spot; push them off to the sides.
 static func _scatter_clues(lv: Dictionary, items: Array, d: int) -> void:

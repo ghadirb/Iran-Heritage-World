@@ -18,7 +18,7 @@ Mechanics already in the game (reuse before inventing):
 | return_to_plain | push tree trunks (`pushable` RigidBody3D) into the bridge slot | `_build_bridge`, `_update_bridge` |
 | balance_gate | push weighted millstones onto a pan so the weights match the target | `_build_scale_gate`, `_update_scale` |
 | archers_field | **bow shooting**: aim with the camera crosshair, shoot button (key F), arrow flies and sticks in the target; targets shrink/move with difficulty; stars from arrows per target | `_shoot`, `_update_archery`, `_target_hit`, `_selftest_archery` |
-| (planned) | chase/escape from a mythical creature | see design doc section 4 |
+| misty_escape | **chase/escape**: run through the glowing gaps in mist gates before a non-violent shadow catches up; a catch resets to the fixed start | `chase_controller.gd`, `_update_chase`, `_selftest_chase` |
 
 ## Difficulty is mandatory, not optional
 Three levels: 0 easy (original data), 1 medium (default), 2 challenge. They are NOT hand-written
@@ -83,6 +83,8 @@ so what you aim at is what you hit (moving targets need a lead). Archery chapter
 hides the target. Planned next: chase/escape from a mythical creature (a standalone 150-300 line script).
 Developer helper to look at a chapter without a phone (needs `xvfb-run` and mesa):
 `xvfb-run -a godot --rendering-driver opengl3 --path app -- --shot=/tmp/a.png --level=6 --z=8 --shoot=40`
-(`--shoot=N` fires at the first target and captures N physics frames later). Every new mechanic
+(`--shoot=N` fires at the first target and captures N physics frames later). The mist chase lives in
+`chase_controller.gd`: it has no collision damage, a catch only resets to the fixed start, and the
+three difficulty knobs stay in `DifficultyRules`. Every new mechanic
 needs a headless bot/test in `--selftest` (see `_selftest_bridge`, `_selftest_logs`) and a `--jumptest`-style check
 when it affects reachability.
