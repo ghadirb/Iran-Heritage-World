@@ -135,7 +135,7 @@ func _push_bodies(delta: float) -> void:
 		if dir.length() < 0.2:
 			continue
 		dir = dir.normalized()
-		var want := dir * run_speed * 0.8
+		var want := dir * run_speed * 0.8 * float(body.get_meta("push_factor", 1.0))
 		body.sleeping = false
 		body.linear_velocity.x = move_toward(body.linear_velocity.x, want.x, 40.0 * delta)
 		body.linear_velocity.z = move_toward(body.linear_velocity.z, want.z, 40.0 * delta)

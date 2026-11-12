@@ -71,7 +71,8 @@ a faster player. Too easy ends the game in minutes; too hard makes a child quit:
 The interact button is for **conversation only** (NPCs, question pedestals). Everything else is physical and automatic:
 clues/banners are collected by walking into them, firewood is picked up by walking onto it and burned by walking
 into the right fire, tree trunks are pushed by running into them (`pushable` RigidBody3D) until they reach the
-bridge slot. Each chapter gets a *different* real action. Planned next: chase/escape from a mythical creature,
-bow shooting at targets, weight puzzle on stone pans (each a standalone 150-300 line script). Every new mechanic
+bridge slot, millstones are pushed onto a pan (chapter 6, weights must sum to the target). Each chapter gets a
+*different* real action. Planned next: chase/escape from a mythical creature, bow shooting at targets
+(each a standalone 150-300 line script). Every new mechanic
 needs a headless bot/test in `--selftest` (see `_selftest_bridge`, `_selftest_logs`) and a `--jumptest`-style check
 when it affects reachability.

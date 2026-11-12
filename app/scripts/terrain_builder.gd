@@ -64,6 +64,8 @@ func height(x: float, z: float) -> float:
 	var d := absf(x - px)
 	var amp := float(cfg.get("amp", 2.0))
 	var hills := noise_a.get_noise_2d(x, z) * amp + noise_b.get_noise_2d(x, z) * amp * 0.28
+	if cfg.has("flat_z"):
+		hills *= smoothstep(18.0, 28.0, absf(z - float(cfg["flat_z"])))
 	var side := maxf(0.0, d - float(cfg.get("valley_half", 12.0)))
 	var ridge := 1.0 + noise_c.get_noise_2d(x * 1.3, z * 1.3) * 0.55
 	var mount := pow(side, 1.42) * float(cfg.get("mount_rise", 0.15)) * ridge

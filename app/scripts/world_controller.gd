@@ -38,6 +38,16 @@ var bridge_delivered := 0
 var bridge_built := false
 var bridge_slot: Area3D
 var _hint_trunk_shown := false
+var scale_stones: Array[RigidBody3D] = []
+var scale_target := 0
+var scale_sum := 0
+var scale_solved := false
+var scale_hold := 0.0
+var scale_pan_l := Vector3.ZERO
+var scale_beam: Node3D
+var scale_lamp: MeshInstance3D
+var scale_door: StaticBody3D
+var scale_door_col: CollisionShape3D
 
 func _ready() -> void:
 	selftest = OS.get_cmdline_user_args().has("--selftest")
@@ -133,6 +143,14 @@ func load_level(index: int, announce: bool = true) -> void:
 	chain_time = 0.0
 	carrying = {}
 	trunks.clear()
+	scale_stones.clear()
+	scale_sum = 0
+	scale_solved = false
+	scale_hold = 0.0
+	scale_beam = null
+	scale_lamp = null
+	scale_door = null
+	scale_door_col = null
 	bridge_need = 0
 	bridge_delivered = 0
 	bridge_built = false
@@ -157,6 +175,8 @@ func load_level(index: int, announce: bool = true) -> void:
 	_build_interactables()
 	if level.has("bridge"):
 		_build_bridge()
+	if level.has("scale"):
+		_build_scale_gate()
 	_build_ambient_particles()
 	var sp: Vector2 = level["spawn"]
 	var sx := terrain.path_x(sp.y) + sp.x
@@ -537,6 +557,8 @@ func _build_interactables() -> void:
 				node = PropFactory.make_log()
 			"quiz":
 				node = PropFactory.make_pedestal()
+			"scale":
+				node = Node3D.new()   # logical anchor; the pans, beam and gate are built by _build_scale_gate()
 			"npc":
 				match str(data["id"]):
 					"simorgh":
@@ -548,11 +570,13 @@ func _build_interactables() -> void:
 						node = PropFactory.make_figure(Color("#6d3b2e"), Color("#cfcfcf"), true)
 					"mobed":
 						node = PropFactory.make_figure(Color("#e6dfcf"), Color("#d8d4c8"), true)
+					"gatekeeper":
+						node = PropFactory.make_figure(Color("#3b4a5a"), Color("#a8a39a"), true)
 					_:
 						node = PropFactory.make_stone_tablet()
 		node.position = pos
 		level_root.add_child(node)
-		if str(data["kind"]) == "npc" and str(data["id"]) in ["sam", "mobed"]:
+		if str(data["kind"]) == "npc" and str(data["id"]) in ["sam", "mobed", "gatekeeper"]:
 			node.look_at(Vector3(pos.x, pos.y, pos.z + 10.0))
 		items.append({"data": data, "node": node, "done": false, "base_y": pos.y, "home": pos})
 
@@ -818,6 +842,7 @@ func _process(delta: float) -> void:
 		_update_platform_checkpoint()
 	_auto_actions()
 	_update_bridge()
+	_update_scale(delta)
 	var near := _nearest_item()
 	hud.set_interact_ready(not near.is_empty())
 	var river_dist := -1.0
@@ -935,6 +960,8 @@ func _selftest_level(i: int) -> int:
 		failures += await _selftest_carry()
 	if level.has("bridge"):
 		failures += await _selftest_bridge()
+	if level.has("scale"):
+		failures += await _selftest_scale()
 	await get_tree().create_timer(0.3).timeout
 	# the player must stand on the terrain after a short settle
 	for _f in range(40):
@@ -1272,3 +1299,260 @@ func _update_bridge() -> void:
 		var z := player.global_position.z
 		if z > float(gap["near"]) + 2.0 or z < float(gap["far"]) - 2.0:
 			checkpoint = player.global_position + Vector3(0, 0.4, 0)
+
+# ---------- balance gate (push millstones onto the left pan) ----------
+
+func _build_scale_gate() -> void:
+	var sc: Dictionary = level["scale"]
+	var diff := GameState.difficulty
+	scale_target = int((sc["target"] as Array)[diff])
+	var weights: Array = (sc["stones"] as Array)[diff]
+	var z := float(sc["z"])
+	var cx := terrain.path_x(z)
+	var gy := terrain.height(cx, z)
+	var pan_off := 6.0
+	scale_pan_l = Vector3(cx - pan_off, terrain.height(cx - pan_off, z), z)
+	var pan_r := Vector3(cx + pan_off, terrain.height(cx + pan_off, z), z)
+	var font: Font = load("res://fonts/Vazirmatn-Bold.ttf")
+	var pan_mat := PropFactory.mat(Color("#c9b78e"), 0.9)
+	var rim_mat := PropFactory.mat(Color("#8a7a58"), 0.9)
+	for p in [scale_pan_l, pan_r]:
+		level_root.add_child(PropFactory.part(PropFactory.cylinder(3.3, 3.3, 0.3, 36), rim_mat, p + Vector3(0, 0.02, 0)))
+		level_root.add_child(PropFactory.part(PropFactory.cylinder(3.0, 3.0, 0.3, 36), pan_mat, p + Vector3(0, 0.06, 0)))
+	# the fixed "offering" on the right pan (its number is the weight to match)
+	var offer := PropFactory.part(PropFactory.cylinder(1.5, 1.5, 1.1, 20), PropFactory.mat(Color("#6d6659"), 0.95), pan_r + Vector3(0, 0.7, 0))
+	level_root.add_child(offer)
+	var offer_body := StaticBody3D.new()
+	var ocs := CollisionShape3D.new()
+	var ocyl := CylinderShape3D.new()
+	ocyl.radius = 1.5
+	ocyl.height = 1.1
+	ocs.shape = ocyl
+	offer_body.add_child(ocs)
+	offer_body.position = pan_r + Vector3(0, 0.7, 0)
+	level_root.add_child(offer_body)
+	level_root.add_child(_weight_label(hud.fa(scale_target), pan_r + Vector3(0, 2.5, 0), font, 0.02))
+	# balance beam on a post; tilts with (left - right)
+	var post := PropFactory.part(PropFactory.cylinder(0.25, 0.35, 7.0, 10), PropFactory.mat(Color("#5b4a38"), 0.9), Vector3(cx, gy + 3.5, z))
+	level_root.add_child(post)
+	scale_beam = Node3D.new()
+	scale_beam.position = Vector3(cx, gy + 7.0, z)
+	scale_beam.add_child(PropFactory.part(PropFactory.box(Vector3(pan_off * 2.0 + 1.6, 0.3, 0.3)), PropFactory.mat(Color("#c79a3d"), 0.4, 0.4), Vector3.ZERO))
+	for sx in [-pan_off, pan_off]:
+		scale_beam.add_child(PropFactory.part(PropFactory.sphere(0.45, 12), PropFactory.mat(Color("#c79a3d"), 0.4, 0.4), Vector3(sx, -0.1, 0)))
+	level_root.add_child(scale_beam)
+	scale_lamp = PropFactory.part(PropFactory.sphere(0.5, 14), PropFactory.mat(Color("#d9a441"), 0.3, 0.0, 2.0), Vector3(cx, gy + 7.9, z))
+	level_root.add_child(scale_lamp)
+	# millstones
+	var pm := PhysicsMaterial.new()
+	pm.friction = 1.0
+	pm.rough = true
+	for i in range(weights.size()):
+		var w := int(weights[i])
+		var r := 0.5 + 0.1 * float(w)
+		var sx2 := scale_pan_l.x + (float(i) - float(weights.size() - 1) * 0.5) * 2.8
+		var sz2 := z + 11.0 + float(i % 2) * 2.6
+		var rb := RigidBody3D.new()
+		rb.name = "Millstone%d" % i
+		rb.mass = 8.0 * float(w)
+		rb.linear_damp = 8.0
+		rb.angular_damp = 20.0
+		rb.axis_lock_angular_x = true
+		rb.axis_lock_angular_z = true
+		rb.continuous_cd = true
+		rb.physics_material_override = pm
+		rb.add_to_group("pushable")
+		rb.set_meta("w", w)
+		rb.set_meta("r", r)
+		rb.set_meta("push_factor", 1.0 / sqrt(float(w)))
+		var cs := CollisionShape3D.new()
+		var cyl := CylinderShape3D.new()
+		cyl.radius = r
+		cyl.height = 1.5
+		cs.shape = cyl
+		rb.add_child(cs)
+		var shade := Color("#a89d88").darkened(0.05 * float(w))
+		rb.add_child(PropFactory.part(PropFactory.cylinder(r, r, 1.5, 20), PropFactory.mat(shade, 0.95)))
+		rb.add_child(PropFactory.part(PropFactory.cylinder(r * 0.22, r * 0.22, 1.54, 10), PropFactory.mat(Color("#5d5648"), 0.9)))
+		level_root.add_child(rb)
+		rb.global_position = Vector3(sx2, terrain.height(sx2, sz2) + 0.85, sz2)
+		rb.set_meta("home", rb.global_position)
+		rb.add_child(_weight_label(hud.fa(w), Vector3(0, 1.3, 0), font, 0.012, true))
+		scale_stones.append(rb)
+	# the gate: pillars, lintel, door, and walls so it cannot be walked around
+	var gz := z - 14.0
+	var stone := PropFactory.mat(Color("#b4a58a"), 0.95)
+	var gate_body := StaticBody3D.new()
+	gate_body.name = "GateWalls"
+	level_root.add_child(gate_body)
+	for side in [-1.0, 1.0]:
+		level_root.add_child(PropFactory.part(PropFactory.box(Vector3(1.4, 8.0, 1.6)), stone, Vector3(cx + side * 3.6, gy + 4.0, gz)))
+		level_root.add_child(PropFactory.part(PropFactory.box(Vector3(34.0, 7.0, 1.6)), stone, Vector3(cx + side * 21.7, gy + 3.5, gz)))
+		var wc := CollisionShape3D.new()
+		var wb := BoxShape3D.new()
+		wb.size = Vector3(34.0, 14.0, 1.6)
+		wc.shape = wb
+		wc.position = Vector3(cx + side * 21.7, gy + 6.0, gz)
+		gate_body.add_child(wc)
+		var pc := CollisionShape3D.new()
+		var pb := BoxShape3D.new()
+		pb.size = Vector3(1.4, 8.0, 1.6)
+		pc.shape = pb
+		pc.position = Vector3(cx + side * 3.6, gy + 4.0, gz)
+		gate_body.add_child(pc)
+	level_root.add_child(PropFactory.part(PropFactory.box(Vector3(8.6, 1.2, 1.6)), stone, Vector3(cx, gy + 8.4, gz)))
+	scale_door = StaticBody3D.new()
+	scale_door.name = "GateDoor"
+	scale_door.position = Vector3(cx, gy + 3.9, gz)
+	scale_door.add_child(PropFactory.part(PropFactory.box(Vector3(5.8, 7.8, 0.8)), PropFactory.mat(Color("#6a4a2c"), 0.8), Vector3.ZERO))
+	scale_door.add_child(PropFactory.part(PropFactory.box(Vector3(5.8, 0.3, 0.9)), PropFactory.mat(Color("#c79a3d"), 0.4, 0.5), Vector3(0, 2.0, 0)))
+	scale_door.add_child(PropFactory.part(PropFactory.box(Vector3(5.8, 0.3, 0.9)), PropFactory.mat(Color("#c79a3d"), 0.4, 0.5), Vector3(0, -2.0, 0)))
+	scale_door_col = CollisionShape3D.new()
+	var dbox := BoxShape3D.new()
+	dbox.size = Vector3(5.8, 7.8, 0.8)
+	scale_door_col.shape = dbox
+	scale_door.add_child(scale_door_col)
+	level_root.add_child(scale_door)
+
+func _weight_label(text: String, pos: Vector3, font: Font, pixel: float, billboard: bool = true) -> Label3D:
+	var l := Label3D.new()
+	l.text = text
+	l.font = font
+	l.font_size = 120
+	l.pixel_size = pixel * 1.6
+	l.outline_size = 14
+	l.modulate = Color("#ffe39a")
+	l.outline_modulate = Color("#3a2a12")
+	l.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	l.no_depth_test = false
+	l.position = pos
+	return l
+
+func _update_scale(delta: float) -> void:
+	if not level.has("scale") or scale_beam == null:
+		return
+	var total := 0
+	var still := true
+	for rb in scale_stones:
+		if not is_instance_valid(rb):
+			continue
+		var p := rb.global_position
+		if p.y < -20.0:
+			rb.linear_velocity = Vector3.ZERO
+			rb.global_position = rb.get_meta("home")
+			continue
+		if Vector2(p.x - scale_pan_l.x, p.z - scale_pan_l.z).length() < 3.0 and absf(p.y - scale_pan_l.y) < 2.2:
+			total += int(rb.get_meta("w"))
+			if rb.linear_velocity.length() > 0.6:
+				still = false
+	scale_sum = total
+	scale_beam.rotation.z = lerpf(scale_beam.rotation.z, clampf(float(total - scale_target) * 0.07, -0.5, 0.5), 1.0 - exp(-4.0 * delta))
+	var lamp_mat := scale_lamp.material_override as StandardMaterial3D
+	var lamp_color := Color("#3fd16a") if total == scale_target else (Color("#e06a3a") if total > scale_target else Color("#d9a441"))
+	lamp_mat.albedo_color = lamp_color
+	lamp_mat.emission = lamp_color
+	if scale_solved:
+		return
+	if total == scale_target and still:
+		scale_hold += delta
+	else:
+		scale_hold = 0.0
+	if scale_hold >= 1.2:
+		_solve_scale()
+
+func _solve_scale() -> void:
+	scale_solved = true
+	for it in items:
+		if str((it["data"] as Dictionary)["kind"]) == "scale":
+			_mark_done(it)
+	_msg("scale_solved", 4.5)
+	var tw := create_tween()
+	tw.tween_property(scale_door, "position:y", scale_door.position.y + 8.2, 1.8).set_trans(Tween.TRANS_SINE)
+	tw.tween_callback(func() -> void: scale_door_col.set_deferred("disabled", true))
+	_check_finish()
+
+func _subset_for(weights: Array, target: int) -> Array:
+	var n := weights.size()
+	var best: Array = []
+	for mask in range(1, 1 << n):
+		var sum := 0
+		var idxs: Array = []
+		for b in range(n):
+			if mask & (1 << b):
+				sum += int(weights[b])
+				idxs.append(b)
+		if sum == target and (best.is_empty() or idxs.size() < best.size()):
+			best = idxs   # fewest stones = fewest to fit on the pan
+	return best
+
+## Bot: the gate stays shut until the weights match; pushing the right millstones opens it; then walk through.
+func _selftest_scale() -> int:
+	var cx := terrain.path_x(float((level["scale"] as Dictionary)["z"]))
+	var gate_z := float((level["scale"] as Dictionary)["z"]) - 14.0
+	# 1) closed gate really blocks
+	player.global_position = Vector3(cx, terrain.height(cx, gate_z + 4.0) + 0.6, gate_z + 4.0)
+	player.velocity = Vector3.ZERO
+	for _f in range(150):
+		await get_tree().physics_frame
+		GameState.move_vector = Vector2(0, -1)
+	GameState.move_vector = Vector2.ZERO
+	if player.global_position.z < gate_z:
+		print("  scale: player walked through the CLOSED gate")
+		return 1
+	# 2) push the stones whose weights sum to the target onto the left pan
+	var ws: Array = []
+	for rb in scale_stones:
+		ws.append(int(rb.get_meta("w")))
+	var pick := _subset_for(ws, scale_target)
+	if pick.is_empty():
+		print("  scale: no stone combination reaches %d" % scale_target)
+		return 1
+	var pan_center := Vector2(scale_pan_l.x, scale_pan_l.z)
+	var slot_n := 0
+	for idx in pick:
+		# each stone gets its own spot on the pan, like a player would (stones cannot overlap)
+		var ang := float(slot_n) * TAU / float(maxi(pick.size(), 1)) + 0.4
+		var pan := pan_center + Vector2(cos(ang), sin(ang)) * 1.7
+		slot_n += 1
+		var rb: RigidBody3D = scale_stones[idx]
+		var r := float(rb.get_meta("r"))
+		for f in range(800):
+			var sp := Vector2(rb.global_position.x, rb.global_position.z)
+			var to_pan := pan - sp
+			if to_pan.length() < 0.9:
+				break
+			var dirv := to_pan.normalized()
+			var behind := sp - dirv * (r + 0.7)
+			if f == 0:
+				player.global_position = Vector3(behind.x, terrain.height(behind.x, behind.y) + 0.6, behind.y)
+				player.velocity = Vector3.ZERO
+			var pp := Vector2(player.global_position.x, player.global_position.z)
+			var mv := dirv + (behind - pp) * 1.2
+			GameState.move_vector = mv.limit_length(1.0)
+			await get_tree().physics_frame
+			if f == 799:
+				print("    push timeout: stone w=%d at %s slot %s player %s" % [int(rb.get_meta("w")), rb.global_position, pan, player.global_position])
+		GameState.move_vector = Vector2.ZERO
+	# 3) wait for the balance + door animation, then walk through
+	player.global_position = Vector3(cx, terrain.height(cx, gate_z + 8.0) + 0.6, gate_z + 8.0)   # step away from the stones
+	player.velocity = Vector3.ZERO
+	for _f in range(480):
+		await get_tree().physics_frame
+	if not scale_solved:
+		print("  scale: not solved (sum=%d target=%d hold=%.2f)" % [scale_sum, scale_target, scale_hold])
+		for rb in scale_stones:
+			print("    stone w=%d pos=%s vel=%.2f" % [int(rb.get_meta("w")), rb.global_position, rb.linear_velocity.length()])
+		return 1
+	player.global_position = Vector3(cx, terrain.height(cx, gate_z + 4.0) + 0.6, gate_z + 4.0)
+	player.velocity = Vector3.ZERO
+	var through := false
+	for _f in range(400):
+		await get_tree().physics_frame
+		GameState.move_vector = Vector2(0, -1)
+		if player.global_position.z < gate_z - 5.0 and player.is_on_floor():
+			through = true
+			break
+	GameState.move_vector = Vector2.ZERO
+	print("  scale: target=%d stones=%s solved=%s through_gate=%s" % [scale_target, str(ws), scale_solved, through])
+	player.global_position = spawn_point
+	return 0 if through else 1
