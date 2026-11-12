@@ -570,7 +570,11 @@ func _shoot() -> void:
 	level_root.add_child(node)
 	node.global_position = from
 	node.look_at(from + vel)
-	arrows.append({"node": node, "pos": from, "vel": vel, "age": 0.0})
+	# The supplied recordings are two complementary parts of a bow shot. The
+	# release starts immediately; the flight sound follows once the arrow is
+	# visibly clear of the character.
+	AudioManager.play_sfx("bow_draw_release")
+	arrows.append({"node": node, "pos": from, "vel": vel, "age": 0.0, "flight_sfx": false})
 
 func _update_archery(delta: float) -> void:
 	if not level.has("archery"):
@@ -590,6 +594,9 @@ func _update_archery(delta: float) -> void:
 			arrows.remove_at(k)
 			continue
 		a["age"] = float(a["age"]) + delta
+		if not bool(a["flight_sfx"]) and float(a["age"]) >= 0.08:
+			a["flight_sfx"] = true
+			AudioManager.play_sfx("bow_shot", 0.7)
 		if bool(a.get("stuck", false)):
 			if float(a["age"]) > 2.0:
 				n.queue_free()

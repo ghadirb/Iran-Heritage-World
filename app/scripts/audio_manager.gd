@@ -8,12 +8,15 @@ const MUSIC_PATH := "res://audio/music_calm.ogg"
 const WIND_PATH := "res://audio/ambient_wind.ogg"
 const WATER_PATH := "res://audio/ambient_water.ogg"
 const VOICE_DIR := "res://audio/voice/"
+const SFX_DIR := "res://audio/sfx/"
 const VOICE_EXT := ["ogg", "mp3", "wav"]
+const SFX_EXT := ["ogg", "mp3", "wav"]
 
 var music: AudioStreamPlayer
 var wind: AudioStreamPlayer
 var water: AudioStreamPlayer
 var voice: AudioStreamPlayer
+var sfx_players: Array[AudioStreamPlayer] = []
 
 var _music_target := 0.0     # 0..1 linear, before user volume
 var _wind_target := 0.0
@@ -32,6 +35,12 @@ func _ready() -> void:
 	voice = AudioStreamPlayer.new()
 	voice.finished.connect(_on_voice_finished)
 	add_child(voice)
+	# A small pool lets the bow release and its flight sound overlap without
+	# allocating nodes while the player is aiming.
+	for _i in range(2):
+		var sfx := AudioStreamPlayer.new()
+		add_child(sfx)
+		sfx_players.append(sfx)
 
 func _make_player(path: String) -> AudioStreamPlayer:
 	var p := AudioStreamPlayer.new()
@@ -142,3 +151,30 @@ func stop_voice() -> void:
 
 func is_voice_playing() -> bool:
 	return voice != null and voice.playing
+
+# ---------- short sound effects ----------
+
+func sfx_path(key: String) -> String:
+	for ext in SFX_EXT:
+		var path := "%s%s.%s" % [SFX_DIR, key, ext]
+		if ResourceLoader.exists(path):
+			return path
+	return ""
+
+func play_sfx(key: String, volume: float = 0.85) -> bool:
+	# Effects follow the existing ambience control, so a child can mute all
+	# non-narration sound without a new settings control.
+	if GameState.ambience_volume <= 0.0:
+		return false
+	var path := sfx_path(key)
+	if path == "":
+		return false
+	var chosen: AudioStreamPlayer = sfx_players[0]
+	for candidate in sfx_players:
+		if not candidate.playing:
+			chosen = candidate
+			break
+	chosen.stream = load(path)
+	chosen.volume_db = linear_to_db(clampf(volume * GameState.ambience_volume, 0.01, 1.0))
+	chosen.play()
+	return true

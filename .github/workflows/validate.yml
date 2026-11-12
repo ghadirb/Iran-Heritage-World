@@ -23,6 +23,11 @@ jobs:
           test -f app/scenes/main.tscn
           test -f app/scripts/player_controller.gd
           test -f app/scripts/game_hud.gd
+      - name: Prepare compressed voice and sound assets
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+          python3 tools/convert_voice.py
       - name: Import project
         run: godot --headless --editor --path app --quit
       - name: Parse and load main scene
