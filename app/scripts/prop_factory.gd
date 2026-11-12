@@ -352,6 +352,15 @@ static func make_wind_gust() -> Node3D:
 	root.add_child(core)
 	return root
 
+static func make_clay_ball() -> Node3D:
+	var root := Node3D.new()
+	root.name = "ClayBallVisual"
+	var clay := mat(Color("#a85e3d"), 0.92)
+	var band := mat(Color("#d59a55"), 0.75, 0.0, 0.08)
+	root.add_child(part(sphere(1.1, 16), clay))
+	root.add_child(part(cylinder(1.13, 1.13, 0.12, 16), band, Vector3(0, 0, 0), Vector3(1, 1, 1)))
+	return root
+
 ## A piece of firewood the player can pick up and carry (see WorldController._pick_log).
 static func make_trunk() -> Node3D:
 	var root := Node3D.new()

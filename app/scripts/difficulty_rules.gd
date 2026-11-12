@@ -28,6 +28,9 @@ const WIND_COUNT := [3, 4, 5]
 const WIND_SPEED := [0.85, 1.15, 1.45]
 const WIND_SWEEP := [8.0, 10.0, 12.0]
 const WIND_RADIUS := [1.65, 1.9, 2.15]
+const ROLL_FINISH_Z := [-88.0, -88.0, -88.0]
+const ROLL_MASS := [10.0, 14.0, 18.0]
+const ROLL_RAIL_HALF_WIDTH := [4.2, 3.5, 3.0]
 
 ## Challenge mode counts change, so these objective texts avoid numbers.
 const CHALLENGE_TEXT := {
@@ -76,6 +79,7 @@ static func apply(src: Dictionary, d: int) -> Dictionary:
 	_shuffle_quiz_options(items)
 	_apply_chase(lv, d)
 	_apply_wind_course(lv, d)
+	_apply_rolling_course(lv, d)
 	return lv
 
 ## Same route, harder pursuit: less lead, more gates, and narrower safe gaps.
@@ -97,6 +101,14 @@ static func _apply_wind_course(lv: Dictionary, d: int) -> void:
 	wind["speed"] = WIND_SPEED[d]
 	wind["sweep"] = WIND_SWEEP[d]
 	wind["radius"] = WIND_RADIUS[d]
+
+static func _apply_rolling_course(lv: Dictionary, d: int) -> void:
+	if not lv.has("rolling_course"):
+		return
+	var course: Dictionary = lv["rolling_course"]
+	course["finish_z"] = ROLL_FINISH_Z[d]
+	course["mass"] = ROLL_MASS[d]
+	course["rail_half_width"] = ROLL_RAIL_HALF_WIDTH[d]
 
 ## Clues that sit right on the path are easy to spot; push them off to the sides.
 static func _scatter_clues(lv: Dictionary, items: Array, d: int) -> void:

@@ -58,6 +58,7 @@ var arrows_fired := 0
 var bow_node: Node3D
 var chase: ChaseController
 var wind_course: WindCourseController
+var rolling_course: RollingCourseController
 
 func _ready() -> void:
 	selftest = OS.get_cmdline_user_args().has("--selftest")
@@ -173,6 +174,7 @@ func load_level(index: int, announce: bool = true) -> void:
 	arrows.clear()
 	chase = null
 	wind_course = null
+	rolling_course = null
 	shoot_cooldown = 0.0
 	archery_time = 0.0
 	arrows_fired = 0
@@ -208,6 +210,8 @@ func load_level(index: int, announce: bool = true) -> void:
 		_build_chase()
 	if level.has("wind_course"):
 		_build_wind_course()
+	if level.has("rolling_course"):
+		_build_rolling_course()
 	_setup_bow()
 	_build_ambient_particles()
 	var sp: Vector2 = level["spawn"]
@@ -221,6 +225,8 @@ func load_level(index: int, announce: bool = true) -> void:
 		chase.reset(spawn_point)
 	if wind_course:
 		wind_course.reset()
+	if rolling_course:
+		rolling_course.reset()
 	player.input_enabled = true
 	hud.close_all_modals()
 	hud.set_level_info(str(level["title"]), str(level["subtitle"]))
@@ -592,6 +598,25 @@ func _update_wind_course(delta: float) -> void:
 		_msg("wind_safe", 3.5)
 		_check_finish()
 
+# ---------- rolling course (chapter 10): physically guide a clay ball ----------
+
+func _build_rolling_course() -> void:
+	rolling_course = RollingCourseController.new()
+	rolling_course.build(level_root, terrain, level)
+
+func _update_rolling_course() -> void:
+	if rolling_course == null:
+		return
+	var result := rolling_course.step()
+	if result == "lost":
+		_msg("roll_lost", 3.5)
+	elif result == "finished":
+		for it in items:
+			if str((it["data"] as Dictionary)["kind"]) == "roll_finish" and not bool(it["done"]):
+				_mark_done(it)
+		_msg("roll_safe", 3.5)
+		_check_finish()
+
 func _aim_ray() -> Dictionary:
 	var cam := player.camera
 	return {"origin": cam.global_position, "dir": -cam.global_transform.basis.z}
@@ -733,6 +758,7 @@ func _physics_process(delta: float) -> void:
 	_update_archery(delta)
 	_update_chase(delta)
 	_update_wind_course(delta)
+	_update_rolling_course()
 	if moving_stones.is_empty():
 		return
 	chain_time += delta
@@ -820,6 +846,9 @@ func _build_interactables() -> void:
 				node = PropFactory.make_clue_marker("clue")
 				pos += Vector3(0, 0.9, 0)
 			"wind_finish":
+				node = PropFactory.make_clue_marker("clue")
+				pos += Vector3(0, 0.9, 0)
+			"roll_finish":
 				node = PropFactory.make_clue_marker("clue")
 				pos += Vector3(0, 0.9, 0)
 			"npc":
@@ -1213,6 +1242,8 @@ func _selftest_level(i: int) -> int:
 		failures += await _selftest_chase()
 	if level.has("wind_course"):
 		failures += await _selftest_wind_course()
+	if level.has("rolling_course"):
+		failures += await _selftest_rolling_course()
 	for it in items:
 		if not bool((it["data"] as Dictionary).get("finale", false)):
 			it["done"] = true
@@ -1448,6 +1479,36 @@ func _selftest_wind_course() -> int:
 	# checkpoint recovery remains finite as well as verifying completion.
 	return 0 if crossed and finish_done and course_mistakes <= 3 else 1
 
+## Physically push the RigidBody3D through its rails; this proves the goal is
+## reachable without an Interact action at every difficulty.
+func _selftest_rolling_course() -> int:
+	if rolling_course == null or rolling_course.ball == null:
+		print("  rolling course: controller missing")
+		return 1
+	var ball := rolling_course.ball
+	var reached := false
+	for _frame in range(2100):
+		if rolling_course.completed:
+			reached = true
+			break
+		if not is_instance_valid(ball):
+			break
+		var behind_z := ball.global_position.z + 2.0
+		if player.global_position.distance_to(Vector3(ball.global_position.x, player.global_position.y, behind_z)) > 2.6:
+			player.global_position = Vector3(ball.global_position.x, terrain.height(ball.global_position.x, behind_z) + 0.6, behind_z)
+			player.velocity = Vector3.ZERO
+		GameState.move_vector = Vector2(clampf((ball.global_position.x - player.global_position.x) * 0.75, -1.0, 1.0), -1.0)
+		await get_tree().physics_frame
+	GameState.move_vector = Vector2.ZERO
+	var finish_done := false
+	for it in items:
+		if str((it["data"] as Dictionary)["kind"]) == "roll_finish":
+			finish_done = bool(it["done"])
+	print("  rolling course: difficulty=%d reached=%s finish=%s" % [GameState.difficulty, reached, finish_done])
+	player.global_position = spawn_point
+	player.velocity = Vector3.ZERO
+	return 0 if reached and finish_done else 1
+
 func _target_at(t: Dictionary, ahead: float) -> Vector3:
 	var b: Vector3 = t["base"]
 	if float(t["amp"]) == 0.0:
@@ -1514,6 +1575,12 @@ func _selftest_difficulty_sanity() -> int:
 		if int(wd.get("count", 0)) < 1 or int(wd.get("count", 0)) > gusts.size():
 			bad += 1
 		if float(wd.get("speed", 0.0)) <= 0.0 or float(wd.get("radius", 0.0)) < 1.0:
+			bad += 1
+	if level.has("rolling_course"):
+		var rd: Dictionary = level["rolling_course"]
+		if float(rd.get("finish_z", 0.0)) >= float(rd.get("start_z", 0.0)) - 25.0:
+			bad += 1
+		if float(rd.get("mass", 0.0)) <= 0.0 or float(rd.get("rail_half_width", 0.0)) < 2.7:
 			bad += 1
 	var orders := []
 	for it in items:
