@@ -252,6 +252,48 @@ static func make_flame(color: Color) -> Node3D:
 
 # ---------- collectibles ----------
 
+## Archery target: concentric rings facing local +Z (use look_at(..., true) to turn it toward the shooter) on a pole.
+static func make_target(radius: float, pole_h: float) -> Node3D:
+	var root := Node3D.new()
+	var colors := [Color("#f4efe4"), Color("#c0392b"), Color("#f4efe4"), Color("#c0392b")]
+	for i in range(4):
+		var r := radius * (1.0 - float(i) * 0.22)
+		var ring := part(cylinder(r, r, 0.1), mat(colors[i], 0.7), Vector3(0, 0, 0.03 * float(i)))
+		ring.rotation.x = PI * 0.5
+		ring.name = "Ring%d" % i
+		root.add_child(ring)
+	root.add_child(part(cylinder(0.08, 0.1, pole_h), mat(Color("#6b4a2b"), 0.95), Vector3(0, -pole_h * 0.5, -0.12)))
+	return root
+
+## Arrow: the tip is at the origin and points to local -Z (so look_at(position + velocity) aims it).
+static func make_arrow() -> Node3D:
+	var root := Node3D.new()
+	var shaft := part(cylinder(0.025, 0.025, 1.1), mat(Color("#b58b52"), 0.8), Vector3(0, 0, 0.55))
+	shaft.rotation.x = PI * 0.5
+	root.add_child(shaft)
+	var tip := part(cylinder(0.0, 0.07, 0.22), mat(Color("#8c8f96"), 0.4, 0.6), Vector3(0, 0, -0.05))
+	tip.rotation.x = -PI * 0.5
+	root.add_child(tip)
+	for k in range(2):
+		var fin := part(box(Vector3(0.01, 0.16, 0.2)), mat(Color("#f4efe4"), 0.9), Vector3(0, 0, 1.0))
+		fin.rotation.z = float(k) * PI * 0.5
+		root.add_child(fin)
+	return root
+
+## Small bow carried by the player in archery chapters (attach to the character art).
+static func make_bow() -> Node3D:
+	var root := Node3D.new()
+	var wood := mat(Color("#7a4a22"), 0.8)
+	root.add_child(part(box(Vector3(0.06, 0.4, 0.06)), wood, Vector3(0, 0, 0)))
+	var up := part(box(Vector3(0.05, 0.5, 0.05)), wood, Vector3(0, 0.42, 0.1))
+	up.rotation.x = 0.45
+	root.add_child(up)
+	var low := part(box(Vector3(0.05, 0.5, 0.05)), wood, Vector3(0, -0.42, 0.1))
+	low.rotation.x = -0.45
+	root.add_child(low)
+	root.add_child(part(box(Vector3(0.012, 1.25, 0.012)), mat(Color("#efe6d2"), 0.9), Vector3(0, 0, 0.0)))
+	return root
+
 ## A piece of firewood the player can pick up and carry (see WorldController._pick_log).
 static func make_trunk() -> Node3D:
 	var root := Node3D.new()

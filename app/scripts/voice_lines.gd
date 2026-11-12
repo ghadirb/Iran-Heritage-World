@@ -12,6 +12,8 @@ const VOICES := {
 	"سام": "بهرام (مرد) - حماسی و نافذ",
 	"سنگ‌نوشته": "شهاب (مرد) - قدرتمند و رسا",
 	"راهنمای تالار": "آرتین (مرد) - با اصالت و شیک",
+	"نگهبان دروازه": "کامیار (مرد) - مصمم و جدی",
+	"آرش": "آرش (مرد) - مطمئن و تاثیرگذار",
 }
 
 static func _row(rows: Array, seen: Dictionary, lid: String, key: String, kind: String, who: String, text: String, priority: int, base: bool) -> void:

@@ -5,6 +5,7 @@ class_name GameHUD
 
 signal jump_pressed
 signal interact_pressed
+signal shoot_pressed
 signal look_delta(relative: Vector2)
 signal start_level(index: int)
 signal restart_requested
@@ -47,6 +48,7 @@ func _ready() -> void:
 	root.add_child(touch)
 	touch.jump_pressed.connect(func() -> void: jump_pressed.emit())
 	touch.interact_pressed.connect(func() -> void: interact_pressed.emit())
+	touch.shoot_pressed.connect(func() -> void: shoot_pressed.emit())
 	touch.look_delta.connect(func(rel: Vector2) -> void: look_delta.emit(rel))
 	touch.menu_pressed.connect(show_pause_menu)
 	touch.knowledge_pressed.connect(show_knowledge_list)
@@ -65,6 +67,8 @@ func _process(delta: float) -> void:
 			toast_panel.visible = false
 	if Input.is_action_just_pressed("interact") and modal_stack.is_empty():
 		interact_pressed.emit()
+	if Input.is_action_just_pressed("shoot") and modal_stack.is_empty():
+		shoot_pressed.emit()
 	if Input.is_action_just_pressed("ui_cancel"):
 		if modal_stack.is_empty():
 			show_pause_menu()
@@ -219,6 +223,10 @@ func toast(text: String, seconds: float = 4.5) -> void:
 	toast_panel.position.x = (root.size.x - toast_panel.size.x) * 0.5
 	toast_panel.position.y = root.size.y - toast_panel.size.y - 24.0
 	toast_timer = seconds
+
+## Archery chapters show the crosshair and the shoot button.
+func set_archery(on: bool) -> void:
+	touch.archery = on
 
 func set_interact_ready(value: bool) -> void:
 	touch.interact_ready = value

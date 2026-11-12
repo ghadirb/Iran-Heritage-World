@@ -110,6 +110,7 @@ func _register_keys() -> void:
 	_add_key("move_right", [KEY_D, KEY_RIGHT])
 	_add_key("jump", [KEY_SPACE])
 	_add_key("interact", [KEY_E, KEY_ENTER])
+	_add_key("shoot", [KEY_F])
 	_add_key("look_left", [KEY_Q])
 	_add_key("look_right", [KEY_R])
 

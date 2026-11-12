@@ -48,6 +48,14 @@ var scale_beam: Node3D
 var scale_lamp: MeshInstance3D
 var scale_door: StaticBody3D
 var scale_door_col: CollisionShape3D
+const ARROW_SPEED := 62.0       # m/s, straight flight (difficulty comes from target size, distance and motion)
+const SHOOT_COOLDOWN := 0.5
+var targets: Array[Dictionary] = []   # archery: {node, base, amp, speed, phase, radius, item, hit}
+var arrows: Array[Dictionary] = []    # flying arrows {node, pos, vel, age}
+var shoot_cooldown := 0.0
+var archery_time := 0.0
+var arrows_fired := 0
+var bow_node: Node3D
 
 func _ready() -> void:
 	selftest = OS.get_cmdline_user_args().has("--selftest")
@@ -67,6 +75,7 @@ func _ready() -> void:
 	hud.jump_pressed.connect(player.request_jump)
 	hud.look_delta.connect(player.add_look)
 	hud.interact_pressed.connect(_interact)
+	hud.shoot_pressed.connect(_shoot)
 	hud.start_level.connect(_start_level_async)
 	hud.restart_requested.connect(func() -> void: load_level(level_index))
 	GameState.quality_changed.connect(_apply_quality)
@@ -94,7 +103,7 @@ func _arg_value(key: String) -> String:
 			return a.substr(key.length() + 1)
 	return ""
 
-## Developer helper: godot --path app -- --shot=out.png --level=0 --z=-20 --yaw=0.4
+## Developer helper: godot --path app -- --shot=out.png --level=0 --z=-20 --yaw=0.4 [--shoot=<physics frames after firing>]
 func _run_screenshot(path: String) -> void:
 	var lv := int(_arg_value("--level")) if _arg_value("--level") != "" else 0
 	load_level(lv, false)
@@ -110,6 +119,13 @@ func _run_screenshot(path: String) -> void:
 	hud.toast("آزمایش نمایش متن فارسی و رابط کاربری", 60.0)
 	for _i in range(90):
 		await get_tree().process_frame
+	if _arg_value("--shoot") != "" and not targets.is_empty():
+		# dev helper (archery chapters): aim at the first target, shoot, capture N physics frames later
+		var tg: Dictionary = targets[0]
+		await _selftest_aim_at(_target_at(tg, 0.4), 0.4)
+		_shoot()
+		for _i in range(int(_arg_value("--shoot"))):
+			await get_tree().physics_frame
 	player.rig.global_position = player.global_position + Vector3(0, 1.5, 0)
 	for _i in range(20):
 		await get_tree().process_frame
@@ -151,6 +167,11 @@ func load_level(index: int, announce: bool = true) -> void:
 	scale_lamp = null
 	scale_door = null
 	scale_door_col = null
+	targets.clear()
+	arrows.clear()
+	shoot_cooldown = 0.0
+	archery_time = 0.0
+	arrows_fired = 0
 	bridge_need = 0
 	bridge_delivered = 0
 	bridge_built = false
@@ -177,6 +198,9 @@ func load_level(index: int, announce: bool = true) -> void:
 		_build_bridge()
 	if level.has("scale"):
 		_build_scale_gate()
+	if level.has("archery"):
+		_build_archery()
+	_setup_bow()
 	_build_ambient_particles()
 	var sp: Vector2 = level["spawn"]
 	var sx := terrain.path_x(sp.y) + sp.x
@@ -467,6 +491,169 @@ func _build_platform_chain() -> void:
 			cs.position = p + Vector3(0, -0.7, 0)
 			body.add_child(cs)
 
+# ---------- archery (chapter 7): aim with the camera, shoot with the shoot button ----------
+
+func _setup_bow() -> void:
+	if is_instance_valid(bow_node):
+		bow_node.queue_free()
+	bow_node = null
+	var on := level.has("archery")
+	hud.set_archery(on)
+	# Over-the-shoulder camera in archery chapters, so the character does not hide what you aim at.
+	player.spring.position = Vector3(0.95, 0.35, 0.0) if on else Vector3.ZERO   # SpringArm3D places the camera itself, so move the arm
+	if on:
+		bow_node = PropFactory.make_bow()
+		player.art.add_child(bow_node)
+		bow_node.position = Vector3(0.38, 1.15, 0.3)
+
+func _build_archery() -> void:
+	var ac: Dictionary = level["archery"]
+	var diff := GameState.difficulty
+	var count: int = int((ac["count"] as Array)[diff])
+	var radius := float((ac["radius"] as Array)[diff])
+	var rng_: Array = (ac["range"] as Array)[diff]
+	var amp := float((ac["move_amp"] as Array)[diff])
+	var spd := float((ac["move_speed"] as Array)[diff])
+	var sp: Vector2 = level["spawn"]
+	var sx := terrain.path_x(sp.y) + sp.x
+	var fracs := [0.0, 0.75, 0.35, 1.0, 0.55]
+	for i in range(count):
+		var t := float(i) / float(maxi(count - 1, 1))
+		var az := lerpf(-0.42, 0.42, t)
+		var dist := lerpf(float(rng_[0]), float(rng_[1]), float(fracs[i % 5]))
+		var x := sx + sin(az) * dist
+		var z := sp.y - cos(az) * dist
+		var h := 1.7 + float(i % 3) * 0.45
+		var node := PropFactory.make_target(radius, h)
+		level_root.add_child(node)
+		node.position = Vector3(x, terrain.height(x, z) + h, z)
+		node.look_at(Vector3(sx, node.position.y, sp.y), Vector3.UP, true)
+		var data := {"kind": "target", "id": "target_%d" % (i + 1), "title": "هدف"}
+		var it := {"data": data, "node": node, "done": false, "base_y": node.position.y, "home": node.position}
+		items.append(it)
+		var moves := amp > 0.0 and i % 2 == 1   # every second target slides sideways (challenge only)
+		targets.append({"node": node, "base": node.position, "amp": amp if moves else 0.0, "speed": spd, "phase": float(i) * 1.9, "radius": radius, "item": it, "hit": false})
+
+func _aim_ray() -> Dictionary:
+	var cam := player.camera
+	return {"origin": cam.global_position, "dir": -cam.global_transform.basis.z}
+
+## The arrow leaves the player's chest and converges on the crosshair ray at the depth of the target
+## the crosshair is closest to, so what you aim at is what you hit (moving targets need a lead).
+func _shoot() -> void:
+	if not level_active or not level.has("archery") or hud.is_modal_open() or shoot_cooldown > 0.0 or finished:
+		return
+	shoot_cooldown = SHOOT_COOLDOWN
+	arrows_fired += 1
+	var ray := _aim_ray()
+	var o: Vector3 = ray["origin"]
+	var dir: Vector3 = ray["dir"]
+	var assist := float(((level["archery"] as Dictionary)["assist"] as Array)[GameState.difficulty])
+	var aim := o + dir * 45.0
+	var best_angle := 0.3   # radians: only targets roughly in front of the crosshair count
+	for t in targets:
+		if bool(t["hit"]):
+			continue
+		var c: Vector3 = (t["node"] as Node3D).global_position
+		var rel := c - o
+		var along := rel.dot(dir)
+		if along < 3.0:
+			continue
+		var off := (rel - dir * along).length()
+		if off / along < best_angle:
+			best_angle = off / along
+			aim = c if off <= float(t["radius"]) * assist and assist > 1.0 else o + dir * along
+	var from := player.global_position + Vector3(0, 1.5, 0)
+	var vel := (aim - from).normalized() * ARROW_SPEED
+	player.art.rotation.y = atan2(vel.x, vel.z)
+	var node := PropFactory.make_arrow()
+	level_root.add_child(node)
+	node.global_position = from
+	node.look_at(from + vel)
+	arrows.append({"node": node, "pos": from, "vel": vel, "age": 0.0})
+
+func _update_archery(delta: float) -> void:
+	if not level.has("archery"):
+		return
+	archery_time += delta
+	shoot_cooldown = maxf(0.0, shoot_cooldown - delta)
+	for t in targets:
+		if bool(t["hit"]) or float(t["amp"]) == 0.0:
+			continue
+		var n: Node3D = t["node"]
+		var b: Vector3 = t["base"]
+		n.position.x = b.x + sin(archery_time * float(t["speed"]) + float(t["phase"])) * float(t["amp"])
+	for k in range(arrows.size() - 1, -1, -1):
+		var a: Dictionary = arrows[k]
+		var n: Node3D = a["node"]
+		if not is_instance_valid(n):
+			arrows.remove_at(k)
+			continue
+		a["age"] = float(a["age"]) + delta
+		if bool(a.get("stuck", false)):
+			if float(a["age"]) > 2.0:
+				n.queue_free()
+				arrows.remove_at(k)
+			continue
+		var p0: Vector3 = a["pos"]
+		var p1: Vector3 = p0 + (a["vel"] as Vector3) * delta
+		var hit := _arrow_target(p0, p1)
+		if not hit.is_empty():
+			arrows.remove_at(k)
+			_target_hit(hit, n)
+			continue
+		a["pos"] = p1
+		n.global_position = p1
+		if p1.y <= terrain.height(p1.x, p1.z) or float(a["age"]) > 2.5:
+			a["stuck"] = true   # sticks into the ground for a moment
+			a["age"] = 0.0
+
+func _arrow_target(p0: Vector3, p1: Vector3) -> Dictionary:
+	var d := p1 - p0
+	var l2 := d.length_squared()
+	for t in targets:
+		if bool(t["hit"]):
+			continue
+		var c: Vector3 = (t["node"] as Node3D).global_position
+		var u := 0.0 if l2 < 0.000001 else clampf((c - p0).dot(d) / l2, 0.0, 1.0)
+		if (p0 + d * u).distance_to(c) <= float(t["radius"]):
+			return t
+	return {}
+
+func _target_hit(t: Dictionary, arrow: Node3D) -> void:
+	t["hit"] = true
+	var node: Node3D = t["node"]
+	arrow.reparent(node, true)   # the arrow stays stuck in the target
+	for i in range(4):
+		var ring := node.get_node_or_null("Ring%d" % i) as MeshInstance3D
+		if ring:
+			var m := StandardMaterial3D.new()
+			m.albedo_color = Color("#3fd16a") if i % 2 == 1 else Color("#bff0c9")
+			m.emission_enabled = true
+			m.emission = m.albedo_color
+			m.emission_energy_multiplier = 0.9
+			ring.material_override = m
+	var burst := PropFactory.make_burst(Color("#8fe39a"))
+	burst.position = node.global_position
+	level_root.add_child(burst)
+	get_tree().create_timer(2.0).timeout.connect(burst.queue_free)
+	var tw := create_tween()
+	node.scale = Vector3.ONE * 1.25
+	tw.tween_property(node, "scale", Vector3.ONE, 0.35).set_trans(Tween.TRANS_BACK)
+	_mark_done(t["item"])
+	var left := 0
+	for o in targets:
+		if not bool(o["hit"]):
+			left += 1
+	if left > 0:
+		_msg("target_hit", 2.0)
+	_check_finish()
+
+## Stars from accuracy: arrows per target (2.5 or fewer = 3 stars).
+func _archery_mistakes() -> int:
+	var per := float(arrows_fired) / float(maxi(targets.size(), 1))
+	return 0 if per <= 2.5 else (1 if per <= 4.5 else 3)
+
 ## Where a stone is right now (moving stones slide, the rest never move).
 func stone_now(i: int) -> Vector3:
 	if moving_stones.has(i):
@@ -476,7 +663,10 @@ func stone_now(i: int) -> Vector3:
 	return chain_position(i)
 
 func _physics_process(delta: float) -> void:
-	if not level_active or moving_stones.is_empty():
+	if not level_active:
+		return
+	_update_archery(delta)
+	if moving_stones.is_empty():
 		return
 	chain_time += delta
 	var ch: Dictionary = level["chain"]
@@ -822,6 +1012,8 @@ func _finish_level() -> void:
 	if finished:
 		return
 	finished = true
+	if level.has("archery"):
+		mistakes = _archery_mistakes()
 	var stars := 3 if mistakes == 0 else (2 if mistakes <= 2 else 1)
 	var k: Dictionary = level["knowledge"]
 	GameState.complete_level(level_index, stars, str(k["id"]))
@@ -962,6 +1154,8 @@ func _selftest_level(i: int) -> int:
 		failures += await _selftest_bridge()
 	if level.has("scale"):
 		failures += await _selftest_scale()
+	if level.has("archery"):
+		failures += await _selftest_archery()
 	await get_tree().create_timer(0.3).timeout
 	# the player must stand on the terrain after a short settle
 	for _f in range(40):
@@ -1060,6 +1254,64 @@ func _selftest_bridge() -> int:
 	print("  bridge: need=%d built=%s crossed=%s" % [need, bridge_built, crossed])
 	player.global_position = spawn_point
 	return 0 if crossed else 1
+
+## Archery bot: a stray arrow hits nothing, then every target is hit by really aiming the camera at it
+## (with a lead for sliding targets), so a human with the same crosshair can finish the level too.
+func _selftest_archery() -> int:
+	var bad := 0
+	var ac: Dictionary = level["archery"]
+	if targets.size() != int((ac["count"] as Array)[GameState.difficulty]):
+		bad += 1
+	for t in targets:
+		var p: Vector3 = (t["node"] as Node3D).global_position
+		if p.y < terrain.height(p.x, p.z) + 1.0 or absf(p.x) > float(level["valley_half"]) - 1.0:
+			print("  archery: target out of the field at ", p)
+			bad += 1
+	# 1) shooting at the sky must not hit anything
+	await _selftest_aim_at(player.global_position + Vector3(0, 40, -40), 0.0)
+	_shoot()
+	for _f in range(150):
+		await get_tree().physics_frame
+	for t in targets:
+		if bool(t["hit"]):
+			bad += 1
+	# 2) hit every target
+	for t in targets:
+		var tries := 0
+		while not bool(t["hit"]) and tries < 4:
+			tries += 1
+			while shoot_cooldown > 0.0:
+				await get_tree().physics_frame
+			var node: Node3D = t["node"]
+			var flight := node.global_position.distance_to(player.global_position) / ARROW_SPEED + 0.1
+			await _selftest_aim_at(_target_at(t, flight), flight)
+			_shoot()
+			for _f in range(90):
+				await get_tree().physics_frame
+				if bool(t["hit"]):
+					break
+		if not bool(t["hit"]):
+			bad += 1
+	var done_all := true
+	for t in targets:
+		if not bool(t["hit"]):
+			done_all = false
+	print("  archery: targets=%d arrows=%d all_hit=%s mistakes=%d" % [targets.size(), arrows_fired, done_all, _archery_mistakes()])
+	return bad
+
+func _target_at(t: Dictionary, ahead: float) -> Vector3:
+	var b: Vector3 = t["base"]
+	if float(t["amp"]) == 0.0:
+		return (t["node"] as Node3D).global_position
+	return Vector3(b.x + sin((archery_time + ahead) * float(t["speed"]) + float(t["phase"])) * float(t["amp"]), b.y, b.z)
+
+func _selftest_aim_at(p: Vector3, ahead: float) -> void:
+	for _i in range(4):
+		var dir := (p - player.camera.global_position).normalized()
+		player.yaw = atan2(-dir.x, -dir.z)
+		player.pitch = clampf(asin(clampf(dir.y, -1.0, 1.0)), player.min_pitch, player.max_pitch)
+		await get_tree().process_frame
+		await get_tree().physics_frame
 
 ## A player standing on a sliding stone must be carried along, not left behind.
 func _selftest_carry() -> int:

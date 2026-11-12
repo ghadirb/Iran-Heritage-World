@@ -6,6 +6,7 @@ extends Control
 
 signal jump_pressed
 signal interact_pressed
+signal shoot_pressed
 signal menu_pressed
 signal knowledge_pressed
 signal look_delta(relative: Vector2)
@@ -24,6 +25,13 @@ var interact_ready := false:
 			interact_ready = value
 			queue_redraw()
 
+## Archery levels: shows the crosshair and the shoot button.
+var archery := false:
+	set(value):
+		if value != archery:
+			archery = value
+			queue_redraw()
+
 var _stick_id := -1
 var _stick_origin := Vector2.ZERO
 var _stick_pos := Vector2.ZERO
@@ -39,6 +47,7 @@ func _btn_center(name: String) -> Vector2:
 	match name:
 		"jump": return Vector2(size.x - 110.0, size.y - 120.0)
 		"interact": return Vector2(size.x - 250.0, size.y - 78.0)
+		"shoot": return Vector2(size.x - 110.0, size.y - 250.0)
 		"menu": return Vector2(size.x - 44.0, 44.0)
 		"knowledge": return Vector2(size.x - 112.0, 44.0)
 	return Vector2.ZERO
@@ -47,10 +56,13 @@ func _btn_radius(name: String) -> float:
 	match name:
 		"jump": return 54.0
 		"interact": return 62.0
+		"shoot": return 60.0
 		_: return 32.0
 
 func _hit_button(pos: Vector2) -> String:
-	for name in ["jump", "interact", "menu", "knowledge"]:
+	for name in ["jump", "interact", "shoot", "menu", "knowledge"]:
+		if name == "shoot" and not archery:
+			continue
 		if pos.distance_to(_btn_center(name)) <= _btn_radius(name) + 10.0:
 			return name
 	return ""
@@ -79,6 +91,7 @@ func _on_press(index: int, pos: Vector2) -> void:
 		match hit:
 			"jump": jump_pressed.emit()
 			"interact": interact_pressed.emit()
+			"shoot": shoot_pressed.emit()
 			"menu": menu_pressed.emit()
 			"knowledge": knowledge_pressed.emit()
 		queue_redraw()
@@ -131,6 +144,15 @@ func _draw() -> void:
 	# action buttons
 	_draw_button("jump", Color(0.2, 0.28, 0.3, 0.6), "پرش")
 	_draw_button("interact", Color(0.88, 0.62, 0.2, 0.9) if interact_ready else Color(0.2, 0.28, 0.3, 0.6), "تعامل")
+	if archery:
+		_draw_button("shoot", Color(0.75, 0.3, 0.2, 0.9), "تیر")
+		var c := size * 0.5
+		draw_arc(c, 16.0, 0.0, TAU, 32, Color(1, 1, 1, 0.85), 2.0, true)
+		draw_line(c + Vector2(-26, 0), c + Vector2(-8, 0), Color(1, 1, 1, 0.85), 2.0)
+		draw_line(c + Vector2(8, 0), c + Vector2(26, 0), Color(1, 1, 1, 0.85), 2.0)
+		draw_line(c + Vector2(0, -26), c + Vector2(0, -8), Color(1, 1, 1, 0.85), 2.0)
+		draw_line(c + Vector2(0, 8), c + Vector2(0, 26), Color(1, 1, 1, 0.85), 2.0)
+		draw_circle(c, 2.0, Color(1, 0.3, 0.2, 0.95))
 	_draw_button("menu", Color(0.12, 0.16, 0.2, 0.7), "≡")
 	_draw_button("knowledge", Color(0.12, 0.16, 0.2, 0.7), "دانش")
 

@@ -15,7 +15,10 @@ Mechanics already in the game (reuse before inventing):
 |---|---|---|
 | stone_pass | jump across a chasm; some stones slide sideways and carry the player | `_build_platform_chain`, `_physics_process`, `DifficultyRules._pick_moving_stones` |
 | simorgh_nest | **carry firewood** (slows you down) to the fires; fire order from a riddle on medium/challenge; wrong fire returns the wood | `_pick_log`, `_drop_log`, `_return_log`, `_use_brazier`, `DifficultyRules._scatter_logs` |
-| (planned) | push a log to bridge a river, bow aiming, chase/flee | see design doc section 4 |
+| return_to_plain | push tree trunks (`pushable` RigidBody3D) into the bridge slot | `_build_bridge`, `_update_bridge` |
+| balance_gate | push weighted millstones onto a pan so the weights match the target | `_build_scale_gate`, `_update_scale` |
+| archers_field | **bow shooting**: aim with the camera crosshair, shoot button (key F), arrow flies and sticks in the target; targets shrink/move with difficulty; stars from arrows per target | `_shoot`, `_update_archery`, `_target_hit`, `_selftest_archery` |
+| (planned) | chase/escape from a mythical creature | see design doc section 4 |
 
 ## Difficulty is mandatory, not optional
 Three levels: 0 easy (original data), 1 medium (default), 2 challenge. They are NOT hand-written
@@ -72,7 +75,14 @@ The interact button is for **conversation only** (NPCs, question pedestals). Eve
 clues/banners are collected by walking into them, firewood is picked up by walking onto it and burned by walking
 into the right fire, tree trunks are pushed by running into them (`pushable` RigidBody3D) until they reach the
 bridge slot, millstones are pushed onto a pan (chapter 6, weights must sum to the target). Each chapter gets a
-*different* real action. Planned next: chase/escape from a mythical creature, bow shooting at targets
-(each a standalone 150-300 line script). Every new mechanic
+*different* real action. Chapter 7 (archers_field) adds bow shooting: the **shoot button** (`TouchControls.shoot_pressed`, key F) is the only
+extra button and appears only in chapters that declare `"archery"`; the interact button stays conversation-only.
+The arrow leaves the chest and converges on the crosshair ray at the depth of the target the crosshair is nearest to,
+so what you aim at is what you hit (moving targets need a lead). Archery chapters use an over-the-shoulder camera
+(`player.spring.position`, because `SpringArm3D` overrides a child camera's own position) so the character never
+hides the target. Planned next: chase/escape from a mythical creature (a standalone 150-300 line script).
+Developer helper to look at a chapter without a phone (needs `xvfb-run` and mesa):
+`xvfb-run -a godot --rendering-driver opengl3 --path app -- --shot=/tmp/a.png --level=6 --z=8 --shoot=40`
+(`--shoot=N` fires at the first target and captures N physics frames later). Every new mechanic
 needs a headless bot/test in `--selftest` (see `_selftest_bridge`, `_selftest_logs`) and a `--jumptest`-style check
 when it affects reachability.
