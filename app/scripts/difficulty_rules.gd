@@ -31,6 +31,10 @@ const WIND_RADIUS := [1.65, 1.9, 2.15]
 const ROLL_FINISH_Z := [-88.0, -88.0, -88.0]
 const ROLL_MASS := [10.0, 14.0, 18.0]
 const ROLL_RAIL_HALF_WIDTH := [4.2, 3.5, 3.0]
+const TURNING_BEAM_COUNT := [4, 5, 6]
+const TURNING_BEAM_SPEED := [0.25, 0.42, 0.58]
+const TURNING_BEAM_ANGLE := [0.16, 0.27, 0.38]
+const TURNING_BEAM_WIDTH := [3.1, 2.75, 2.4]
 
 ## Challenge mode counts change, so these objective texts avoid numbers.
 const CHALLENGE_TEXT := {
@@ -80,6 +84,7 @@ static func apply(src: Dictionary, d: int) -> Dictionary:
 	_apply_chase(lv, d)
 	_apply_wind_course(lv, d)
 	_apply_rolling_course(lv, d)
+	_apply_turning_bridge(lv, d)
 	return lv
 
 ## Same route, harder pursuit: less lead, more gates, and narrower safe gaps.
@@ -109,6 +114,15 @@ static func _apply_rolling_course(lv: Dictionary, d: int) -> void:
 	course["finish_z"] = ROLL_FINISH_Z[d]
 	course["mass"] = ROLL_MASS[d]
 	course["rail_half_width"] = ROLL_RAIL_HALF_WIDTH[d]
+
+static func _apply_turning_bridge(lv: Dictionary, d: int) -> void:
+	if not lv.has("turning_bridge"):
+		return
+	var bridge: Dictionary = lv["turning_bridge"]
+	bridge["count"] = TURNING_BEAM_COUNT[d]
+	bridge["speed"] = TURNING_BEAM_SPEED[d]
+	bridge["angle"] = TURNING_BEAM_ANGLE[d]
+	bridge["width"] = TURNING_BEAM_WIDTH[d]
 
 ## Clues that sit right on the path are easy to spot; push them off to the sides.
 static func _scatter_clues(lv: Dictionary, items: Array, d: int) -> void:

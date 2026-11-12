@@ -59,6 +59,7 @@ var bow_node: Node3D
 var chase: ChaseController
 var wind_course: WindCourseController
 var rolling_course: RollingCourseController
+var turning_bridge: TurningBridgeController
 
 func _ready() -> void:
 	selftest = OS.get_cmdline_user_args().has("--selftest")
@@ -175,6 +176,7 @@ func load_level(index: int, announce: bool = true) -> void:
 	chase = null
 	wind_course = null
 	rolling_course = null
+	turning_bridge = null
 	shoot_cooldown = 0.0
 	archery_time = 0.0
 	arrows_fired = 0
@@ -212,6 +214,8 @@ func load_level(index: int, announce: bool = true) -> void:
 		_build_wind_course()
 	if level.has("rolling_course"):
 		_build_rolling_course()
+	if level.has("turning_bridge"):
+		_build_turning_bridge()
 	_setup_bow()
 	_build_ambient_particles()
 	var sp: Vector2 = level["spawn"]
@@ -227,6 +231,8 @@ func load_level(index: int, announce: bool = true) -> void:
 		wind_course.reset()
 	if rolling_course:
 		rolling_course.reset()
+	if turning_bridge:
+		turning_bridge.reset()
 	player.input_enabled = true
 	hud.close_all_modals()
 	hud.set_level_info(str(level["title"]), str(level["subtitle"]))
@@ -617,6 +623,23 @@ func _update_rolling_course() -> void:
 		_msg("roll_safe", 3.5)
 		_check_finish()
 
+# ---------- turning bridge (chapter 11): balance across rotating beams ----------
+
+func _build_turning_bridge() -> void:
+	turning_bridge = TurningBridgeController.new()
+	turning_bridge.build(level_root, terrain, level)
+
+func _update_turning_bridge(delta: float) -> void:
+	if turning_bridge == null:
+		return
+	var result := turning_bridge.step(delta, player.global_position)
+	if result == "crossed":
+		for it in items:
+			if str((it["data"] as Dictionary)["kind"]) == "turn_finish" and not bool(it["done"]):
+				_mark_done(it)
+		_msg("turning_safe", 3.5)
+		_check_finish()
+
 func _aim_ray() -> Dictionary:
 	var cam := player.camera
 	return {"origin": cam.global_position, "dir": -cam.global_transform.basis.z}
@@ -759,6 +782,7 @@ func _physics_process(delta: float) -> void:
 	_update_chase(delta)
 	_update_wind_course(delta)
 	_update_rolling_course()
+	_update_turning_bridge(delta)
 	if moving_stones.is_empty():
 		return
 	chain_time += delta
@@ -849,6 +873,9 @@ func _build_interactables() -> void:
 				node = PropFactory.make_clue_marker("clue")
 				pos += Vector3(0, 0.9, 0)
 			"roll_finish":
+				node = PropFactory.make_clue_marker("clue")
+				pos += Vector3(0, 0.9, 0)
+			"turn_finish":
 				node = PropFactory.make_clue_marker("clue")
 				pos += Vector3(0, 0.9, 0)
 			"npc":
@@ -1134,6 +1161,10 @@ func _process(delta: float) -> void:
 		_respawn()
 	if level.has("chain") and player.is_on_floor():
 		_update_platform_checkpoint()
+	if turning_bridge and player.is_on_floor():
+		var rest := turning_bridge.static_checkpoint(player.global_position)
+		if rest != Vector3.ZERO:
+			checkpoint = rest
 	_auto_actions()
 	_update_bridge()
 	_update_scale(delta)
@@ -1244,6 +1275,8 @@ func _selftest_level(i: int) -> int:
 		failures += await _selftest_wind_course()
 	if level.has("rolling_course"):
 		failures += await _selftest_rolling_course()
+	if level.has("turning_bridge"):
+		failures += await _selftest_turning_bridge()
 	for it in items:
 		if not bool((it["data"] as Dictionary).get("finale", false)):
 			it["done"] = true
@@ -1338,6 +1371,12 @@ func _selftest_bridge() -> int:
 			await get_tree().physics_frame
 			if not is_instance_valid(rb) or bridge_delivered > before:
 				break
+			# Stay on the pushing side as the heavy trunk crosses uneven ground;
+			# otherwise a long test run can leave the bot rubbing its side.
+			var push_z := rb.global_position.z + 2.1
+			if player.global_position.distance_to(Vector3(rb.global_position.x, player.global_position.y, push_z)) > 2.5:
+				player.global_position = Vector3(rb.global_position.x, terrain.height(rb.global_position.x, push_z) + 0.6, push_z)
+				player.velocity = Vector3.ZERO
 			GameState.move_vector = Vector2(clampf((rb.global_position.x - player.global_position.x) * 0.8, -1.0, 1.0), -1.0)
 		GameState.move_vector = Vector2.ZERO
 		if bridge_delivered <= before:
@@ -1509,6 +1548,42 @@ func _selftest_rolling_course() -> int:
 	player.velocity = Vector3.ZERO
 	return 0 if reached and finish_done else 1
 
+## Walk and jump across the real rotating collision bodies. The bot may only
+## resume after a fall from the last fixed rest pad, never from a beam.
+func _selftest_turning_bridge() -> int:
+	if turning_bridge == null:
+		print("  turning bridge: controller missing")
+		return 1
+	var recoveries := 0
+	var crossed := false
+	for _frame in range(2600):
+		if turning_bridge.crossed:
+			crossed = true
+			break
+		var target := turning_bridge.guide_point(player.global_position)
+		var d := Vector2(target.x - player.global_position.x, target.z - player.global_position.z)
+		if d.length() > 1.5:
+			GameState.move_vector = d.normalized()
+			if player.is_on_floor() and d.length() > 3.0:
+				player.request_jump()
+		else:
+			GameState.move_vector = Vector2(0, -1)
+		await get_tree().physics_frame
+		if player.global_position.y < kill_y:
+			recoveries += 1
+			_respawn(false)
+			if recoveries > 4:
+				break
+	GameState.move_vector = Vector2.ZERO
+	var finish_done := false
+	for it in items:
+		if str((it["data"] as Dictionary)["kind"]) == "turn_finish":
+			finish_done = bool(it["done"])
+	print("  turning bridge: difficulty=%d crossed=%s finish=%s recoveries=%d" % [GameState.difficulty, crossed, finish_done, recoveries])
+	player.global_position = spawn_point
+	player.velocity = Vector3.ZERO
+	return 0 if crossed and finish_done and recoveries <= 4 else 1
+
 func _target_at(t: Dictionary, ahead: float) -> Vector3:
 	var b: Vector3 = t["base"]
 	if float(t["amp"]) == 0.0:
@@ -1581,6 +1656,12 @@ func _selftest_difficulty_sanity() -> int:
 		if float(rd.get("finish_z", 0.0)) >= float(rd.get("start_z", 0.0)) - 25.0:
 			bad += 1
 		if float(rd.get("mass", 0.0)) <= 0.0 or float(rd.get("rail_half_width", 0.0)) < 2.7:
+			bad += 1
+	if level.has("turning_bridge"):
+		var td: Dictionary = level["turning_bridge"]
+		if int(td.get("count", 0)) < 3 or int(td.get("count", 0)) > 6:
+			bad += 1
+		if float(td.get("speed", 0.0)) <= 0.0 or float(td.get("angle", 0.0)) <= 0.0 or float(td.get("width", 0.0)) < 1.8:
 			bad += 1
 	var orders := []
 	for it in items:
@@ -2007,7 +2088,9 @@ func _selftest_scale() -> int:
 				break
 			var dirv := to_pan.normalized()
 			var behind := sp - dirv * (r + 0.7)
-			if f == 0:
+			# Keep the bot on the pushing side of this physical stone. On uneven
+			# terrain a long push can otherwise leave it rubbing the rim instead.
+			if f == 0 or Vector2(player.global_position.x - behind.x, player.global_position.z - behind.y).length() > 2.0:
 				player.global_position = Vector3(behind.x, terrain.height(behind.x, behind.y) + 0.6, behind.y)
 				player.velocity = Vector3.ZERO
 			var pp := Vector2(player.global_position.x, player.global_position.z)
