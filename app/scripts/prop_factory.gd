@@ -325,6 +325,33 @@ static func make_mist_chaser() -> Node3D:
 	root.add_child(trail)
 	return root
 
+## A readable gust: broad enough to see from behind, but intentionally cheap.
+static func make_wind_gust() -> Node3D:
+	var root := Node3D.new()
+	root.name = "WindGust"
+	var particles := CPUParticles3D.new()
+	particles.amount = 32
+	particles.lifetime = 1.2
+	particles.preprocess = 1.2
+	particles.direction = Vector3(1, 0.18, 0)
+	particles.spread = 22.0
+	particles.initial_velocity_min = 2.2
+	particles.initial_velocity_max = 3.8
+	particles.gravity = Vector3(0, 0.15, 0)
+	var mesh := QuadMesh.new()
+	mesh.size = Vector2(0.42, 0.42)
+	particles.mesh = mesh
+	var material := StandardMaterial3D.new()
+	material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	material.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
+	material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	material.albedo_color = Color(0.78, 0.94, 1.0, 0.52)
+	particles.material_override = material
+	root.add_child(particles)
+	var core := part(sphere(0.45, 10), mat(Color(0.7, 0.9, 1.0, 0.5), 0.4, 0.0, 1.4), Vector3(0, 0.3, 0), Vector3(1.0, 1.8, 1.0))
+	root.add_child(core)
+	return root
+
 ## A piece of firewood the player can pick up and carry (see WorldController._pick_log).
 static func make_trunk() -> Node3D:
 	var root := Node3D.new()

@@ -57,6 +57,7 @@ var archery_time := 0.0
 var arrows_fired := 0
 var bow_node: Node3D
 var chase: ChaseController
+var wind_course: WindCourseController
 
 func _ready() -> void:
 	selftest = OS.get_cmdline_user_args().has("--selftest")
@@ -171,6 +172,7 @@ func load_level(index: int, announce: bool = true) -> void:
 	targets.clear()
 	arrows.clear()
 	chase = null
+	wind_course = null
 	shoot_cooldown = 0.0
 	archery_time = 0.0
 	arrows_fired = 0
@@ -204,6 +206,8 @@ func load_level(index: int, announce: bool = true) -> void:
 		_build_archery()
 	if level.has("chase"):
 		_build_chase()
+	if level.has("wind_course"):
+		_build_wind_course()
 	_setup_bow()
 	_build_ambient_particles()
 	var sp: Vector2 = level["spawn"]
@@ -215,6 +219,8 @@ func load_level(index: int, announce: bool = true) -> void:
 	player.snap_camera_behind(0.0)
 	if chase:
 		chase.reset(spawn_point)
+	if wind_course:
+		wind_course.reset()
 	player.input_enabled = true
 	hud.close_all_modals()
 	hud.set_level_info(str(level["title"]), str(level["subtitle"]))
@@ -561,6 +567,31 @@ func _update_chase(delta: float) -> void:
 		_msg("chase_safe", 3.5)
 		_check_finish()
 
+# ---------- wind course (chapter 9): wait, then cross each moving gust ----------
+
+func _build_wind_course() -> void:
+	wind_course = WindCourseController.new()
+	wind_course.build(level_root, terrain, level)
+
+func _update_wind_course(delta: float) -> void:
+	if wind_course == null:
+		return
+	var result := wind_course.step(delta, player.global_position)
+	if result == "caught":
+		mistakes += 1
+		_msg("wind_caught", 3.0)
+		_respawn(false)
+	elif result == "checkpoint":
+		# The player has already crossed a gust on ordinary terrain, so this is
+		# a static and safe checkpoint for the next timing challenge.
+		checkpoint = player.global_position + Vector3(0, 0.4, 0)
+	elif result == "escaped":
+		for it in items:
+			if str((it["data"] as Dictionary)["kind"]) == "wind_finish" and not bool(it["done"]):
+				_mark_done(it)
+		_msg("wind_safe", 3.5)
+		_check_finish()
+
 func _aim_ray() -> Dictionary:
 	var cam := player.camera
 	return {"origin": cam.global_position, "dir": -cam.global_transform.basis.z}
@@ -701,6 +732,7 @@ func _physics_process(delta: float) -> void:
 		return
 	_update_archery(delta)
 	_update_chase(delta)
+	_update_wind_course(delta)
 	if moving_stones.is_empty():
 		return
 	chain_time += delta
@@ -785,6 +817,9 @@ func _build_interactables() -> void:
 			"scale":
 				node = Node3D.new()   # logical anchor; the pans, beam and gate are built by _build_scale_gate()
 			"escape":
+				node = PropFactory.make_clue_marker("clue")
+				pos += Vector3(0, 0.9, 0)
+			"wind_finish":
 				node = PropFactory.make_clue_marker("clue")
 				pos += Vector3(0, 0.9, 0)
 			"npc":
@@ -1176,6 +1211,8 @@ func _selftest_level(i: int) -> int:
 	if level.has("chase"):
 		# Run the physical course before generic completion marks every goal done.
 		failures += await _selftest_chase()
+	if level.has("wind_course"):
+		failures += await _selftest_wind_course()
 	for it in items:
 		if not bool((it["data"] as Dictionary).get("finale", false)):
 			it["done"] = true
@@ -1370,6 +1407,47 @@ func _selftest_chase() -> int:
 	player.velocity = Vector3.ZERO
 	return 0 if escaped and refuge_done and mistakes == mistakes_before else 1
 
+## Wait before a gust, then cross when it has swept far from the central path.
+func _selftest_wind_course() -> int:
+	if wind_course == null:
+		print("  wind course: controller missing")
+		return 1
+	var mistakes_before := mistakes
+	var crossed := false
+	for _frame in range(2600):
+		if wind_course.escaped:
+			crossed = true
+			break
+		var gust := wind_course.next_gust(player.global_position)
+		var move := false
+		if gust.is_empty():
+			move = true
+		else:
+			var gz := float(gust["z"])
+			var gp := wind_course.gust_position(gust)
+			if player.global_position.z > gz + 3.0:
+				move = true
+			else:
+				# Cross while the gust is already travelling away from the route, giving
+				# the player the whole outward-and-return sweep as crossing time.
+				var sweep := float((level["wind_course"] as Dictionary)["sweep"])
+				move = absf(gp.x) > sweep * 0.65 and wind_course.is_moving_away_from_path(gust)
+		var dx := clampf(-player.global_position.x * 0.45, -0.7, 0.7)
+		GameState.move_vector = Vector2(dx, -1.0).normalized() if move else Vector2(dx, 0.0)
+		await get_tree().physics_frame
+	GameState.move_vector = Vector2.ZERO
+	var finish_done := false
+	for it in items:
+		if str((it["data"] as Dictionary)["kind"]) == "wind_finish":
+			finish_done = bool(it["done"])
+	var course_mistakes := mistakes - mistakes_before
+	print("  wind course: difficulty=%d escaped=%s finish=%s recoveries=%d" % [GameState.difficulty, crossed, finish_done, course_mistakes])
+	player.global_position = spawn_point
+	player.velocity = Vector3.ZERO
+	# A child may touch a gust while learning its rhythm; verify the static
+	# checkpoint recovery remains finite as well as verifying completion.
+	return 0 if crossed and finish_done and course_mistakes <= 3 else 1
+
 func _target_at(t: Dictionary, ahead: float) -> Vector3:
 	var b: Vector3 = t["base"]
 	if float(t["amp"]) == 0.0:
@@ -1429,6 +1507,13 @@ func _selftest_difficulty_sanity() -> int:
 		if int(cd.get("gate_count", 0)) < 1 or int(cd.get("gate_count", 0)) > gates.size():
 			bad += 1
 		if float(cd.get("finish_z", 0.0)) >= -8.0:
+			bad += 1
+	if level.has("wind_course"):
+		var wd: Dictionary = level["wind_course"]
+		var gusts: Array = wd.get("gusts", [])
+		if int(wd.get("count", 0)) < 1 or int(wd.get("count", 0)) > gusts.size():
+			bad += 1
+		if float(wd.get("speed", 0.0)) <= 0.0 or float(wd.get("radius", 0.0)) < 1.0:
 			bad += 1
 	var orders := []
 	for it in items:

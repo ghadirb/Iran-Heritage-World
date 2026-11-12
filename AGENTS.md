@@ -19,6 +19,7 @@ Mechanics already in the game (reuse before inventing):
 | balance_gate | push weighted millstones onto a pan so the weights match the target | `_build_scale_gate`, `_update_scale` |
 | archers_field | **bow shooting**: aim with the camera crosshair, shoot button (key F), arrow flies and sticks in the target; targets shrink/move with difficulty; stars from arrows per target | `_shoot`, `_update_archery`, `_target_hit`, `_selftest_archery` |
 | misty_escape | **chase/escape**: run through the glowing gaps in mist gates before a non-violent shadow catches up; a catch resets to the fixed start | `chase_controller.gd`, `_update_chase`, `_selftest_chase` |
+| wind_path | **timing/avoid**: wait for a moving gust to sweep aside, then run across its line; a hit returns to the last static checkpoint | `wind_course_controller.gd`, `_update_wind_course`, `_selftest_wind_course` |
 
 ## Difficulty is mandatory, not optional
 Three levels: 0 easy (original data), 1 medium (default), 2 challenge. They are NOT hand-written
@@ -80,7 +81,8 @@ extra button and appears only in chapters that declare `"archery"`; the interact
 The arrow leaves the chest and converges on the crosshair ray at the depth of the target the crosshair is nearest to,
 so what you aim at is what you hit (moving targets need a lead). Archery chapters use an over-the-shoulder camera
 (`player.spring.position`, because `SpringArm3D` overrides a child camera's own position) so the character never
-hides the target. Planned next: chase/escape from a mythical creature (a standalone 150-300 line script).
+hides the target. Chapter 8 uses a nonviolent mist chase through moving safe gaps; chapter 9 uses timed
+wind gusts, with collision returning the player only to their last static checkpoint.
 Developer helper to look at a chapter without a phone (needs `xvfb-run` and mesa):
 `xvfb-run -a godot --rendering-driver opengl3 --path app -- --shot=/tmp/a.png --level=6 --z=8 --shoot=40`
 (`--shoot=N` fires at the first target and captures N physics frames later). The mist chase lives in

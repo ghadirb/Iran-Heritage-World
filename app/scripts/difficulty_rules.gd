@@ -24,6 +24,10 @@ const CHASE_START_GAP := [30.0, 25.0, 22.0]
 const CHASE_GATE_COUNT := [3, 4, 5]
 const CHASE_GAP_WIDTH := [8.0, 6.6, 5.4]
 const CHASE_CATCH_RADIUS := [2.0, 2.25, 2.5]
+const WIND_COUNT := [3, 4, 5]
+const WIND_SPEED := [0.85, 1.15, 1.45]
+const WIND_SWEEP := [8.0, 10.0, 12.0]
+const WIND_RADIUS := [1.65, 1.9, 2.15]
 
 ## Challenge mode counts change, so these objective texts avoid numbers.
 const CHALLENGE_TEXT := {
@@ -71,6 +75,7 @@ static func apply(src: Dictionary, d: int) -> Dictionary:
 	_scatter_logs(lv, items, d)
 	_shuffle_quiz_options(items)
 	_apply_chase(lv, d)
+	_apply_wind_course(lv, d)
 	return lv
 
 ## Same route, harder pursuit: less lead, more gates, and narrower safe gaps.
@@ -83,6 +88,15 @@ static func _apply_chase(lv: Dictionary, d: int) -> void:
 	chase["gate_count"] = CHASE_GATE_COUNT[d]
 	chase["gap_width"] = CHASE_GAP_WIDTH[d]
 	chase["catch_radius"] = CHASE_CATCH_RADIUS[d]
+
+static func _apply_wind_course(lv: Dictionary, d: int) -> void:
+	if not lv.has("wind_course"):
+		return
+	var wind: Dictionary = lv["wind_course"]
+	wind["count"] = WIND_COUNT[d]
+	wind["speed"] = WIND_SPEED[d]
+	wind["sweep"] = WIND_SWEEP[d]
+	wind["radius"] = WIND_RADIUS[d]
 
 ## Clues that sit right on the path are easy to spot; push them off to the sides.
 static func _scatter_clues(lv: Dictionary, items: Array, d: int) -> void:
