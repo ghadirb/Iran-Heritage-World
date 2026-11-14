@@ -24,6 +24,10 @@ const CHASE_START_GAP := [30.0, 25.0, 22.0]
 const CHASE_GATE_COUNT := [3, 4, 5]
 const CHASE_GAP_WIDTH := [8.0, 6.6, 5.4]
 const CHASE_CATCH_RADIUS := [2.0, 2.25, 2.5]
+const WATCH_OMEGA := [26.0, 34.0, 44.0]       # beam sweep, degrees per second
+const WATCH_HALF := [18.0, 21.0, 24.0]        # beam half-angle, degrees
+const WATCH_RANGE := [19.0, 21.0, 23.0]
+const WATCH_GRACE := [0.55, 0.4, 0.3]         # seconds in light before being seen
 const WIND_COUNT := [3, 4, 5]
 const WIND_SPEED := [0.85, 1.15, 1.45]
 const WIND_SWEEP := [8.0, 10.0, 12.0]
@@ -95,6 +99,7 @@ static func apply(src: Dictionary, d: int) -> Dictionary:
 	_apply_turning_bridge(lv, d)
 	_apply_lamp_road(lv, d)
 	_apply_mosaic(lv, d)
+	_apply_night_watch(lv, d)
 	_apply_light(lv, d)
 	return lv
 
@@ -153,6 +158,18 @@ static func _apply_mosaic(lv: Dictionary, d: int) -> void:
 	mosaic["seq_len"] = MOSAIC_SEQ_LEN[d]
 	mosaic["show_time"] = MOSAIC_SHOW_TIME[d]
 	mosaic["tile_radius"] = MOSAIC_TILE_RADIUS[d]
+
+## Same crossing: faster, wider beams; the hardest level adds a second tower to every stretch.
+static func _apply_night_watch(lv: Dictionary, d: int) -> void:
+	if not lv.has("night_watch"):
+		return
+	var w: Dictionary = lv["night_watch"]
+	w["omega"] = WATCH_OMEGA[d]
+	w["half_angle"] = WATCH_HALF[d]
+	w["range"] = WATCH_RANGE[d]
+	w["grace"] = WATCH_GRACE[d]
+	if d >= 2:
+		w["towers"] = (w["towers"] as Array) + (w["hard_towers"] as Array)
 
 ## Same hall: one, two or three mirrors in the chain (each difficulty has its own layout in the level data).
 static func _apply_light(lv: Dictionary, d: int) -> void:

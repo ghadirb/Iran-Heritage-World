@@ -63,6 +63,7 @@ var turning_bridge: TurningBridgeController
 var lamp_carry: LampCarryController
 var mosaic: MosaicCourtController
 var mirror_hall: MirrorHallController
+var night_watch: NightWatchController
 
 func _ready() -> void:
 	selftest = OS.get_cmdline_user_args().has("--selftest")
@@ -183,6 +184,7 @@ func load_level(index: int, announce: bool = true) -> void:
 	lamp_carry = null
 	mosaic = null
 	mirror_hall = null
+	night_watch = null
 	shoot_cooldown = 0.0
 	archery_time = 0.0
 	arrows_fired = 0
@@ -228,6 +230,8 @@ func load_level(index: int, announce: bool = true) -> void:
 		_build_mosaic()
 	if level.has("light"):
 		_build_mirror_hall()
+	if level.has("night_watch"):
+		_build_night_watch()
 	_setup_bow()
 	_build_ambient_particles()
 	var sp: Vector2 = level["spawn"]
@@ -251,6 +255,8 @@ func load_level(index: int, announce: bool = true) -> void:
 		mosaic.reset()
 	if mirror_hall:
 		mirror_hall.reset()
+	if night_watch:
+		night_watch.reset()
 	player.input_enabled = true
 	hud.close_all_modals()
 	hud.set_level_info(str(level["title"]), str(level["subtitle"]))
@@ -738,6 +744,35 @@ func _update_mirror_hall(delta: float) -> void:
 			_msg("mirror_solved", 3.5)
 			_check_finish()
 
+# ---------- night watch (chapter 15): cross beams of light, rest in shade ----------
+
+func _build_night_watch() -> void:
+	night_watch = NightWatchController.new()
+	night_watch.build(level_root, terrain, level)
+
+func _update_night_watch(delta: float) -> void:
+	if night_watch == null:
+		return
+	var result := night_watch.step(delta, player.global_position, player.is_on_floor())
+	if night_watch.last_zone >= 0:
+		checkpoint = night_watch.zone_center(night_watch.last_zone) + Vector3(0, 1.2, 0)
+	match result:
+		"watch":
+			_msg("watch_start", 5.0)
+		"seen":
+			mistakes += 1
+			if night_watch.last_zone < 0:
+				checkpoint = spawn_point
+			_respawn(false)
+			night_watch.after_seen()
+			_msg("watch_seen", 4.0)
+		"arrived":
+			for it in items:
+				if str((it["data"] as Dictionary)["kind"]) == "watch_finish" and not bool(it["done"]):
+					_mark_done(it)
+			_msg("watch_safe", 3.5)
+			_check_finish()
+
 func _aim_ray() -> Dictionary:
 	var cam := player.camera
 	return {"origin": cam.global_position, "dir": -cam.global_transform.basis.z}
@@ -884,6 +919,7 @@ func _physics_process(delta: float) -> void:
 	_update_lamp_road(delta)
 	_update_mosaic(delta)
 	_update_mirror_hall(delta)
+	_update_night_watch(delta)
 	if moving_stones.is_empty():
 		return
 	chain_time += delta
@@ -976,7 +1012,7 @@ func _build_interactables() -> void:
 			"roll_finish":
 				node = PropFactory.make_clue_marker("clue")
 				pos += Vector3(0, 0.9, 0)
-			"turn_finish", "lamp_finish", "mosaic_finish", "mirror_finish":
+			"turn_finish", "lamp_finish", "mosaic_finish", "mirror_finish", "watch_finish":
 				node = PropFactory.make_clue_marker("clue")
 				pos += Vector3(0, 0.9, 0)
 			"npc":
@@ -1404,6 +1440,8 @@ func _selftest_level(i: int) -> int:
 		failures += await _selftest_mosaic()
 	if level.has("light"):
 		failures += await _selftest_mirror_hall()
+	if level.has("night_watch"):
+		failures += await _selftest_night_watch()
 	for it in items:
 		if not bool((it["data"] as Dictionary).get("finale", false)):
 			it["done"] = true
@@ -1829,6 +1867,80 @@ func _selftest_mosaic() -> int:
 
 ## Bot that really walks: running across a disc must not turn a mirror, the yellow/blue discs must turn it
 ## in opposite directions, and turning the mirrors to the solution must put the light on the lantern.
+## Standing in a beam must get the courier caught, shade must be safe, and a careful bot (waits in the shade
+## until the way to the next awning is clear, with real physics) must reach the last station.
+func _selftest_night_watch() -> int:
+	var nw := night_watch
+	if nw == null:
+		print("  night_watch: controller missing")
+		return 1
+	var bad := 0
+	# 1) shade is safe: stand in the first awning for 15 seconds
+	nw.reset()
+	player.global_position = nw.zone_center(0) + Vector3(0, 1.2, 0)
+	player.velocity = Vector3.ZERO
+	GameState.move_vector = Vector2.ZERO
+	for _f in range(900):
+		await get_tree().physics_frame
+	var shade_ok := nw.seen_count == 0
+	# 2) the open path must catch a courier who just stands there
+	var spot := nw.zone_center(0).lerp(nw.zone_center(1), 0.5)
+	checkpoint = nw.zone_center(0) + Vector3(0, 1.2, 0)
+	var caught := false
+	for _round in range(30):
+		player.global_position = spot + Vector3(0, 1.2, 0)
+		player.velocity = Vector3.ZERO
+		for _f in range(60):
+			await get_tree().physics_frame
+		if nw.seen_count > 0:
+			caught = true
+			break
+	# 3) the careful bot
+	nw.reset()
+	player.global_position = spawn_point
+	player.velocity = Vector3.ZERO
+	checkpoint = spawn_point
+	var next_zone := 0
+	var going := false
+	var speed := base_run_speed * 0.8
+	for _frame in range(9000):
+		if nw.arrived:
+			break
+		var p := Vector2(player.global_position.x, player.global_position.z)
+		var goal := Vector2(nw.zones[next_zone].x, nw.zones[next_zone].y)
+		if p.distance_to(goal) < nw.zone_radius * 0.6:
+			if next_zone == nw.zones.size() - 1:
+				break
+			next_zone += 1
+			going = false
+			goal = nw.zones[next_zone]
+		if not going:
+			var clear := true
+			var dist := p.distance_to(goal)
+			var steps := int(dist / 1.0) + 1
+			for k in range(steps + 1):
+				var q := p.lerp(goal, float(k) / float(steps))
+				var tt: float = nw.elapsed + (dist * float(k) / float(steps)) / speed + 0.15
+				if nw.lit(q, tt, 7.0):
+					clear = false
+					break
+			going = clear
+		if going:
+			var d := goal - p
+			GameState.move_vector = d.normalized()
+		else:
+			GameState.move_vector = Vector2.ZERO
+		await get_tree().physics_frame
+	GameState.move_vector = Vector2.ZERO
+	var finish_done := false
+	for it in items:
+		if str((it["data"] as Dictionary)["kind"]) == "watch_finish":
+			finish_done = bool(it["done"])
+	print("  night_watch: difficulty=%d towers=%d arrived=%s finish=%s shade_ok=%s open_catches=%s seen_by_bot=%d" % [GameState.difficulty, nw.towers.size(), nw.arrived, finish_done, shade_ok, caught, nw.seen_count])
+	if not (shade_ok and caught and nw.arrived and finish_done):
+		bad += 1
+	return bad
+
 func _selftest_mirror_hall() -> int:
 	var hall := mirror_hall
 	if hall == null:
@@ -2055,6 +2167,19 @@ func _selftest_difficulty_sanity() -> int:
 			for dj in range(di + 1, disc_list.size()):
 				if dv.distance_to(disc_list[dj]) < float(ld["disc_radius"]) * 2.0 + 0.5:
 					bad += 1
+	if level.has("night_watch"):
+		var nd: Dictionary = level["night_watch"]
+		var nz: Array = nd["zones"]
+		if nz.size() < 3 or (nd["towers"] as Array).is_empty():
+			bad += 1
+		for zi in range(1, nz.size()):
+			if (nz[zi - 1] as Vector2).distance_to(nz[zi]) > 32.0:
+				bad += 1   # awnings must stay close enough to run between during one dark gap
+		# crossing a stretch at full speed must be faster than one lap of a beam, or waiting never helps
+		if float(nd["omega"]) * 0.0174533 * (26.0 / base_run_speed) > TAU * 0.9:
+			bad += 1
+		if float(nd["grace"]) < 0.2:
+			bad += 1
 	var orders := []
 	for it in items:
 		if str((it["data"] as Dictionary)["kind"]) == "brazier":
