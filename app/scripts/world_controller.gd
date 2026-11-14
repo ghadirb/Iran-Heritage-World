@@ -1,0 +1,2642 @@
+extends Node3D
+class_name WorldController
+## Builds each chapter from LevelData, runs interactions and mission flow.
+
+const TALK_KINDS := ["npc", "quiz"]
+const AUTO_RADIUS := {"clue": 1.9, "log": 1.7, "brazier": 2.6}
+var interact_radius := 4.2
+var beam_range := 9999.0
+
+@onready var hud: GameHUD = $HUD
+
+var player: PlayerController
+var level_root: Node3D
+var level: Dictionary = {}
+var level_index := 0
+var terrain: TerrainBuilder
+var items: Array[Dictionary] = []
+var sun: DirectionalLight3D
+var world_env: WorldEnvironment
+var grass_instances: Array[MultiMeshInstance3D] = []
+var clouds: Array[MeshInstance3D] = []
+var simorgh: Node3D
+var spawn_point := Vector3.ZERO
+var checkpoint := Vector3.ZERO
+var brazier_next := 0
+var mistakes := 0
+var level_active := false
+var finished := false
+var kill_y := -30.0
+var selftest := false
+var moving_stones: Dictionary = {}   # chain index -> {"body": AnimatableBody3D, "base": Vector3, "phase": float}
+var chain_time := 0.0
+var carrying: Dictionary = {}       # the log item the player holds (empty = nothing)
+var base_run_speed := 6.2
+var trunks: Array[RigidBody3D] = []   # pushable tree trunks (bridge levels)
+var bridge_need := 0
+var bridge_delivered := 0
+var bridge_built := false
+var bridge_slot: Area3D
+var _hint_trunk_shown := false
+var scale_stones: Array[RigidBody3D] = []
+var scale_target := 0
+var scale_sum := 0
+var scale_solved := false
+var scale_hold := 0.0
+var scale_pan_l := Vector3.ZERO
+var scale_beam: Node3D
+var scale_lamp: MeshInstance3D
+var scale_door: StaticBody3D
+var scale_door_col: CollisionShape3D
+const ARROW_SPEED := 62.0       # m/s, straight flight (difficulty comes from target size, distance and motion)
+const SHOOT_COOLDOWN := 0.5
+var targets: Array[Dictionary] = []   # archery: {node, base, amp, speed, phase, radius, item, hit}
+var arrows: Array[Dictionary] = []    # flying arrows {node, pos, vel, age}
+var shoot_cooldown := 0.0
+var archery_time := 0.0
+var arrows_fired := 0
+var bow_node: Node3D
+var chase: ChaseController
+var wind_course: WindCourseController
+var rolling_course: RollingCourseController
+var turning_bridge: TurningBridgeController
+var lamp_carry: LampCarryController
+var mosaic: MosaicCourtController
+var mirror_hall: MirrorHallController
+var night_watch: NightWatchController
+
+func _ready() -> void:
+	selftest = OS.get_cmdline_user_args().has("--selftest")
+	player = PlayerController.new()
+	player.name = "Player"
+	base_run_speed = player.run_speed
+	var shape := CollisionShape3D.new()
+	var capsule := CapsuleShape3D.new()
+	capsule.radius = 0.42
+	capsule.height = 1.8
+	shape.shape = capsule
+	shape.position = Vector3(0, 0.9, 0)
+	player.add_child(shape)
+	player.art = PropFactory.make_zal()
+	player.add_child(player.art)
+	add_child(player)
+	hud.jump_pressed.connect(player.request_jump)
+	hud.look_delta.connect(player.add_look)
+	hud.interact_pressed.connect(_interact)
+	hud.shoot_pressed.connect(_shoot)
+	hud.start_level.connect(_start_level_async)
+	hud.restart_requested.connect(func() -> void: load_level(level_index))
+	GameState.quality_changed.connect(_apply_quality)
+	if OS.get_cmdline_user_args().has("--jumptest"):
+		await get_tree().process_frame
+		await _run_jumptest()
+		return
+	if selftest:
+		await get_tree().process_frame
+		await _run_selftest()
+		return
+	var shot := _arg_value("--shot")
+	if shot != "":
+		await _run_screenshot(shot)
+		return
+	# No 3D level behind the menu: building it before the player taps anything
+	# froze weak phones and made the menu unresponsive.
+	hud.show_main_menu()
+	if GameState.safe_mode_triggered:
+		hud.toast("بازی در حالت سبک (کم‌مصرف) شروع شد. از «تنظیمات» می‌توانید کیفیت را تغییر دهید.", 8.0)
+
+func _arg_value(key: String) -> String:
+	for a in OS.get_cmdline_user_args():
+		if a.begins_with(key + "="):
+			return a.substr(key.length() + 1)
+	return ""
+
+## Developer helper: godot --path app -- --shot=out.png --level=0 --z=-20 --yaw=0.4 [--shoot=<physics frames after firing>]
+func _run_screenshot(path: String) -> void:
+	var lv := int(_arg_value("--level")) if _arg_value("--level") != "" else 0
+	load_level(lv, false)
+	hud.close_all_modals()
+	if _arg_value("--z") != "":
+		var z := float(_arg_value("--z"))
+		var x := terrain.path_x(z)
+		player.global_position = Vector3(x, terrain.height(x, z) + 1.0, z)
+	if _arg_value("--yaw") != "":
+		player.yaw = float(_arg_value("--yaw"))
+	if _arg_value("--pitch") != "":
+		player.pitch = float(_arg_value("--pitch"))
+	hud.toast("آزمایش نمایش متن فارسی و رابط کاربری", 60.0)
+	for _i in range(90):
+		await get_tree().process_frame
+	if _arg_value("--shoot") != "" and not targets.is_empty():
+		# dev helper (archery chapters): aim at the first target, shoot, capture N physics frames later
+		var tg: Dictionary = targets[0]
+		await _selftest_aim_at(_target_at(tg, 0.4), 0.4)
+		_shoot()
+		for _i in range(int(_arg_value("--shoot"))):
+			await get_tree().physics_frame
+	player.rig.global_position = player.global_position + Vector3(0, 1.5, 0)
+	for _i in range(20):
+		await get_tree().process_frame
+	get_viewport().get_texture().get_image().save_png(path)
+	print("saved ", path)
+	get_tree().quit()
+
+# ---------- level loading ----------
+
+func _start_level_async(index: int) -> void:
+	hud.show_loading("در حال بارگذاری مرحله…")
+	await get_tree().process_frame
+	await get_tree().process_frame
+	GameState.begin_loading_guard()
+	load_level(index, true)
+	await get_tree().process_frame
+	await get_tree().process_frame
+	GameState.end_loading_guard()
+
+func load_level(index: int, announce: bool = true) -> void:
+	level_index = clampi(index, 0, LevelData.LEVELS.size() - 1)
+	GameState.current_level = level_index
+	level = DifficultyRules.apply(LevelData.LEVELS[level_index], GameState.difficulty)
+	interact_radius = DifficultyRules.INTERACT_RADIUS[GameState.difficulty]
+	beam_range = DifficultyRules.BEAM_RANGE[GameState.difficulty]
+	level_active = false
+	finished = false
+	mistakes = 0
+	brazier_next = 0
+	moving_stones.clear()
+	chain_time = 0.0
+	carrying = {}
+	trunks.clear()
+	scale_stones.clear()
+	scale_sum = 0
+	scale_solved = false
+	scale_hold = 0.0
+	scale_beam = null
+	scale_lamp = null
+	scale_door = null
+	scale_door_col = null
+	targets.clear()
+	arrows.clear()
+	chase = null
+	wind_course = null
+	rolling_course = null
+	turning_bridge = null
+	lamp_carry = null
+	mosaic = null
+	mirror_hall = null
+	night_watch = null
+	shoot_cooldown = 0.0
+	archery_time = 0.0
+	arrows_fired = 0
+	bridge_need = 0
+	bridge_delivered = 0
+	bridge_built = false
+	bridge_slot = null
+	_hint_trunk_shown = false
+	player.run_speed = base_run_speed
+	items.clear()
+	grass_instances.clear()
+	clouds.clear()
+	simorgh = null
+	if level_root:
+		level_root.queue_free()
+	level_root = Node3D.new()
+	level_root.name = "Level"
+	add_child(level_root)
+	terrain = TerrainBuilder.new(level)
+	kill_y = float(level.get("kill_y", -30.0))
+	_build_environment()
+	_build_ground()
+	_build_vegetation()
+	_build_decor()
+	_build_interactables()
+	if level.has("bridge"):
+		_build_bridge()
+	if level.has("scale"):
+		_build_scale_gate()
+	if level.has("archery"):
+		_build_archery()
+	if level.has("chase"):
+		_build_chase()
+	if level.has("wind_course"):
+		_build_wind_course()
+	if level.has("rolling_course"):
+		_build_rolling_course()
+	if level.has("turning_bridge"):
+		_build_turning_bridge()
+	if level.has("lamp_road"):
+		_build_lamp_road()
+	if level.has("mosaic"):
+		_build_mosaic()
+	if level.has("light"):
+		_build_mirror_hall()
+	if level.has("night_watch"):
+		_build_night_watch()
+	_setup_bow()
+	_build_ambient_particles()
+	var sp: Vector2 = level["spawn"]
+	var sx := terrain.path_x(sp.y) + sp.x
+	spawn_point = Vector3(sx, terrain.height(sx, sp.y) + 1.2, sp.y)
+	checkpoint = spawn_point
+	player.global_position = spawn_point
+	player.velocity = Vector3.ZERO
+	player.snap_camera_behind(0.0)
+	if chase:
+		chase.reset(spawn_point)
+	if wind_course:
+		wind_course.reset()
+	if rolling_course:
+		rolling_course.reset()
+	if turning_bridge:
+		turning_bridge.reset()
+	if lamp_carry:
+		lamp_carry.reset()
+	if mosaic:
+		mosaic.reset()
+	if mirror_hall:
+		mirror_hall.reset()
+	if night_watch:
+		night_watch.reset()
+	player.input_enabled = true
+	hud.close_all_modals()
+	hud.set_level_info(str(level["title"]), str(level["subtitle"]))
+	hud.set_objective(str(level["objective"]))
+	_refresh_progress()
+	_apply_quality()
+	level_active = true
+	AudioManager.play_level(level)
+	var lid := str(level["id"])
+	# A reworded (harder) variant has its own narration keys; missing files are simply skipped.
+	var intro_key := str(level.get("voice_intro", lid + "__intro"))
+	var objective_key := str(level.get("voice_objective", lid + "__objective"))
+	var voice_keys: Array = [objective_key]
+	if announce:
+		voice_keys = [intro_key, lid + "__" + str(level.get("intro_extra_key", "intro_extra")), objective_key] if level.has("intro_extra") else [intro_key, objective_key]
+	hud.set_level_voice(voice_keys)
+	if announce:
+		hud.toast((str(level["intro"]) + " " + str(level.get("intro_extra", ""))).strip_edges(), 8.0)
+
+# ---------- environment ----------
+
+func _build_environment() -> void:
+	world_env = WorldEnvironment.new()
+	var env := Environment.new()
+	env.background_mode = Environment.BG_SKY
+	var sky := Sky.new()
+	var sm := ProceduralSkyMaterial.new()
+	sm.sky_top_color = Color(str(level["sky_top"]))
+	sm.sky_horizon_color = Color(str(level["sky_horizon"]))
+	sm.ground_horizon_color = Color(str(level["sky_horizon"])).darkened(0.1)
+	sm.ground_bottom_color = Color(str(level["fog"])).darkened(0.35)
+	sm.sky_curve = 0.18
+	sm.sun_angle_max = 24.0
+	sm.sun_curve = 0.12
+	sky.sky_material = sm
+	env.sky = sky
+	env.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
+	env.ambient_light_sky_contribution = 0.45
+	env.ambient_light_color = Color(str(level["ambient"]))
+	env.ambient_light_energy = 0.9
+	env.tonemap_mode = Environment.TONE_MAPPER_FILMIC
+	env.tonemap_white = 5.0
+	env.fog_enabled = true
+	env.fog_light_color = Color(str(level["fog"]))
+	env.fog_density = float(level["fog_density"])
+	env.fog_sky_affect = 0.55
+	env.glow_enabled = true
+	env.glow_intensity = 0.7
+	env.glow_bloom = 0.06
+	env.glow_hdr_threshold = 1.1
+	env.adjustment_enabled = true
+	env.adjustment_contrast = 1.08
+	env.adjustment_saturation = 1.18
+	world_env.environment = env
+	level_root.add_child(world_env)
+
+	sun = DirectionalLight3D.new()
+	sun.rotation_degrees = level["sun_rot"]
+	sun.light_color = Color(str(level["sun_color"]))
+	sun.light_energy = float(level["sun_energy"])
+	sun.shadow_enabled = true
+	sun.shadow_bias = 0.12
+	sun.shadow_normal_bias = 2.6
+	sun.shadow_blur = 1.4
+	sun.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_2_SPLITS
+	sun.directional_shadow_max_distance = 70.0
+	level_root.add_child(sun)
+
+	var cloud_mat := StandardMaterial3D.new()
+	cloud_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	cloud_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	cloud_mat.albedo_color = Color(1, 1, 1, 0.82).lerp(Color(str(level["sky_horizon"])), 0.25)
+	var rng := RandomNumberGenerator.new()
+	rng.seed = int(level["seed"])
+	for i in range(9):
+		var cloud := Node3D.new()
+		for j in range(4):
+			var puff := PropFactory.part(PropFactory.sphere(1.0, 12), cloud_mat, Vector3(float(j) * 9.0 - 14.0, rng.randf_range(-1.0, 1.5), rng.randf_range(-3.0, 3.0)), Vector3(12.0 + rng.randf() * 6.0, 3.5 + rng.randf() * 2.0, 8.0))
+			puff.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+			cloud.add_child(puff)
+		cloud.position = Vector3(rng.randf_range(-150, 150), rng.randf_range(70, 110), rng.randf_range(-260, -20))
+		level_root.add_child(cloud)
+		clouds.append(cloud.get_child(0) as MeshInstance3D)
+		cloud.set_meta("speed", rng.randf_range(0.6, 1.6))
+		cloud.name = "Cloud%d" % i
+
+func _apply_quality() -> void:
+	var q := GameState.quality
+	GameState.apply_engine_quality()
+	if sun:
+		sun.shadow_enabled = GameState.shadows
+	if world_env:
+		world_env.environment.glow_enabled = q >= 2
+		world_env.environment.fog_enabled = true
+		world_env.environment.adjustment_enabled = q >= 1
+	var fractions := [0.3, 0.6, 1.0]
+	for inst in grass_instances:
+		var total := inst.multimesh.instance_count
+		inst.multimesh.visible_instance_count = int(float(total) * fractions[q])
+
+# ---------- ground ----------
+
+func _build_ground() -> void:
+	var mesh := terrain.build_terrain(2.0)
+	var body := StaticBody3D.new()
+	body.name = "Terrain"
+	var mi := MeshInstance3D.new()
+	mi.mesh = mesh
+	mi.material_override = terrain.terrain_material()
+	body.add_child(mi)
+	var col := CollisionShape3D.new()
+	var shp := mesh.create_trimesh_shape()
+	shp.backface_collision = true
+	col.shape = shp
+	body.add_child(col)
+	level_root.add_child(body)
+	var river := terrain.build_river()
+	if river:
+		level_root.add_child(river)
+	# invisible side / end walls
+	var half := float(level["valley_half"]) + 15.0 + float(level.get("path_sway", 2.0)) * 1.8
+	var length := float(level["length"])
+	var wall_body := StaticBody3D.new()
+	wall_body.name = "Bounds"
+	for side in [-1.0, 1.0]:
+		var ws := CollisionShape3D.new()
+		var bx := BoxShape3D.new()
+		bx.size = Vector3(2.0, 200.0, length + 80.0)
+		ws.shape = bx
+		ws.position = Vector3(side * (half + 1.0), 40.0, -length * 0.5 + 8.0)
+		wall_body.add_child(ws)
+	for zpos in [terrain.z_max - 2.0, -length - 22.0]:
+		var wz := CollisionShape3D.new()
+		var bz := BoxShape3D.new()
+		bz.size = Vector3(half * 2.0 + 10.0, 200.0, 2.0)
+		wz.shape = bz
+		wz.position = Vector3(0, 40.0, zpos)
+		wall_body.add_child(wz)
+	level_root.add_child(wall_body)
+
+func _build_vegetation() -> void:
+	var tree_count := int(level["trees"])
+	if tree_count > 0:
+		var pts := terrain.scatter_points(tree_count, maxf(5.0, float(level.get("lane_clear", 0.0))), float(level["valley_half"]) + 22.0)
+		var trees := terrain.build_multimesh(terrain.make_pine_mesh(), terrain.solid_vertex_material(0.95), pts, 0.85, 1.7)
+		level_root.add_child(trees)
+		var tb := StaticBody3D.new()
+		for p in pts:
+			var cs := CollisionShape3D.new()
+			var cyl := CylinderShape3D.new()
+			cyl.radius = 0.3
+			cyl.height = 3.0
+			cs.shape = cyl
+			cs.position = p + Vector3(0, 1.5, 0)
+			tb.add_child(cs)
+		level_root.add_child(tb)
+	var rock_count := int(level["rocks"])
+	if rock_count > 0:
+		for variant in range(3):
+			var rp := terrain.scatter_points(rock_count / 3, maxf(3.0, float(level.get("lane_clear", 0.0))), float(level["valley_half"]) + 20.0, false)
+			var rmat := terrain.solid_vertex_material(1.0)
+			rmat.albedo_color = Color(str(level["rock"])).lightened(0.05 * float(variant))
+			var rocks := terrain.build_multimesh(terrain.make_rock_mesh(variant), rmat, rp, 0.8, 3.2)
+			level_root.add_child(rocks)
+			var rb := StaticBody3D.new()
+			for p in rp:
+				var cs := CollisionShape3D.new()
+				var sph := SphereShape3D.new()
+				sph.radius = 0.7
+				cs.shape = sph
+				cs.position = p + Vector3(0, 0.3, 0)
+				rb.add_child(cs)
+			level_root.add_child(rb)
+	var grass_count := int(level["grass_count"])
+	if grass_count > 0:
+		var gp := terrain.scatter_points(grass_count, 1.6, float(level["valley_half"]) + 6.0)
+		var grass := terrain.build_multimesh(terrain.make_grass_mesh(), terrain.foliage_material(), gp, 0.6, 1.25)
+		grass.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		level_root.add_child(grass)
+		grass_instances.append(grass)
+	var flower_count := int(level["flowers"])
+	if flower_count > 0:
+		var colors := [Color("#f2f2f2"), Color("#e8559a"), Color("#f0c43a"), Color("#8f6ae0")]
+		for ci in range(colors.size()):
+			var fp := terrain.scatter_points(flower_count / colors.size(), 1.8, float(level["valley_half"]) + 4.0)
+			var fl := terrain.build_multimesh(terrain.make_flower_mesh(colors[ci]), terrain.foliage_material(), fp, 0.9, 1.5)
+			fl.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+			level_root.add_child(fl)
+			grass_instances.append(fl)
+
+func _build_decor() -> void:
+	if bool(level.get("hall", false)):
+		for i in range(8):
+			for side in [-1.0, 1.0]:
+				var col := PropFactory.make_column()
+				col.position = Vector3(side * 12.0, terrain.height(side * 12.0, 8.0 - float(i) * 8.0), 8.0 - float(i) * 8.0)
+				level_root.add_child(col)
+				var cb := StaticBody3D.new()
+				var cs := CollisionShape3D.new()
+				var cyl := CylinderShape3D.new()
+				cyl.radius = 1.0
+				cyl.height = 10.0
+				cs.shape = cyl
+				cb.position = col.position + Vector3(0, 5.0, 0)
+				cb.add_child(cs)
+				level_root.add_child(cb)
+		for i in range(4):
+			var lamp := PropFactory.make_brazier(Color("#ffb347"))
+			lamp.position = Vector3(0, 0.0, 2.0 - float(i) * 16.0) + Vector3(0, terrain.height(0, 2.0 - float(i) * 16.0), 0)
+			lamp.add_child(PropFactory.make_flame(Color("#ff9a3c")))
+			level_root.add_child(lamp)
+	if bool(level.get("tents", false)):
+		var tent_colors := [Color("#c8a15a"), Color("#a8483a"), Color("#d8c08a"), Color("#6c8f9a")]
+		for i in range(10):
+			var z := -112.0 - float(i % 5) * 6.0
+			var x := terrain.path_x(z) + (-10.0 if i % 2 == 0 else 10.0) + float(i % 3) * 2.0
+			var tent := PropFactory.make_tent(tent_colors[i % tent_colors.size()])
+			tent.position = Vector3(x, terrain.height(x, z), z)
+			tent.rotation.y = float(i) * 0.7
+			level_root.add_child(tent)
+	if level.has("chain"):
+		_build_platform_chain()
+	if level.has("nest"):
+		var n: Vector2 = level["nest"]
+		var nest := PropFactory.make_nest()
+		nest.position = Vector3(n.x, terrain.height(n.x, n.y), n.y)
+		level_root.add_child(nest)
+
+func chain_position(i: int) -> Vector3:
+	var ch: Dictionary = level["chain"]
+	var count := int(ch["count"])
+	var t := float(i) / float(maxi(count - 1, 1))
+	var z := lerpf(float(ch["z0"]), float(ch["z1"]), t)
+	var x := terrain.path_x(z) + sin(float(i) * 1.4) * float(ch["sway"])
+	# Anchor the first stone to solid ground BEFORE the chasm, not to the
+	# terrain height inside the chasm (which is dozens of metres lower).
+	var z_start := float(ch["z0"]) + 5.0
+	var z_end := float(ch["z1"])
+	var start_x := terrain.path_x(z_start)
+	var end_x := terrain.path_x(z_end)
+	var y_start := terrain.height(start_x, z_start) + 0.12
+	var y_end := terrain.height(end_x, z_end) + 0.65
+	var platform_y := lerpf(y_start, y_end, t)
+	return Vector3(x, platform_y, z)
+
+func _build_platform_chain() -> void:
+	var ch: Dictionary = level["chain"]
+	var stone := PropFactory.mat(Color("#5f574c"), 1.0)
+	var moss := PropFactory.mat(Color("#6fae3f"), 1.0)
+	var body := StaticBody3D.new()
+	body.name = "StonePlatforms"
+	level_root.add_child(body)
+	for i in range(int(ch["count"])):
+		var p := chain_position(i)
+		var holder := Node3D.new()
+		var is_moving: bool = (ch.get("moving", []) as Array).has(i)
+		holder.position = Vector3.ZERO if is_moving else p
+		holder.rotation.y = sin(float(i) * 2.1) * 0.5
+		holder.add_child(PropFactory.part(PropFactory.box(Vector3(3.4, 1.4, 3.4)), stone, Vector3(0, -0.7, 0)))
+		holder.add_child(PropFactory.part(PropFactory.box(Vector3(3.5, 0.12, 3.5)), moss, Vector3(0, -0.04, 0)))
+		holder.add_child(PropFactory.part(PropFactory.cylinder(0.9, 0.2, 6.0, 7), stone, Vector3(0, -4.4, 0)))
+		var cs := CollisionShape3D.new()
+		var bx := BoxShape3D.new()
+		bx.size = Vector3(3.4, 1.4, 3.4)
+		cs.shape = bx
+		cs.rotation.y = holder.rotation.y
+		if is_moving:
+			# A sliding stone is its own AnimatableBody3D so it carries the player.
+			var mover := AnimatableBody3D.new()
+			mover.name = "MovingStone%d" % i
+			mover.sync_to_physics = true
+			mover.position = p
+			cs.position = Vector3(0, -0.7, 0)
+			mover.add_child(cs)
+			mover.add_child(holder)
+			level_root.add_child(mover)
+			moving_stones[i] = {"body": mover, "base": p, "phase": float(i) * 1.7}
+		else:
+			level_root.add_child(holder)
+			cs.position = p + Vector3(0, -0.7, 0)
+			body.add_child(cs)
+
+# ---------- archery (chapter 7): aim with the camera, shoot with the shoot button ----------
+
+func _setup_bow() -> void:
+	if is_instance_valid(bow_node):
+		bow_node.queue_free()
+	bow_node = null
+	var on := level.has("archery")
+	hud.set_archery(on)
+	# Over-the-shoulder camera in archery chapters, so the character does not hide what you aim at.
+	player.spring.position = Vector3(0.95, 0.35, 0.0) if on else Vector3.ZERO   # SpringArm3D places the camera itself, so move the arm
+	if on:
+		bow_node = PropFactory.make_bow()
+		player.art.add_child(bow_node)
+		bow_node.position = Vector3(0.38, 1.15, 0.3)
+
+func _build_archery() -> void:
+	var ac: Dictionary = level["archery"]
+	var diff := GameState.difficulty
+	var count: int = int((ac["count"] as Array)[diff])
+	var radius := float((ac["radius"] as Array)[diff])
+	var rng_: Array = (ac["range"] as Array)[diff]
+	var amp := float((ac["move_amp"] as Array)[diff])
+	var spd := float((ac["move_speed"] as Array)[diff])
+	var sp: Vector2 = level["spawn"]
+	var sx := terrain.path_x(sp.y) + sp.x
+	var fracs := [0.0, 0.75, 0.35, 1.0, 0.55]
+	for i in range(count):
+		var t := float(i) / float(maxi(count - 1, 1))
+		var az := lerpf(-0.42, 0.42, t)
+		var dist := lerpf(float(rng_[0]), float(rng_[1]), float(fracs[i % 5]))
+		var x := sx + sin(az) * dist
+		var z := sp.y - cos(az) * dist
+		var h := 1.7 + float(i % 3) * 0.45
+		var node := PropFactory.make_target(radius, h)
+		level_root.add_child(node)
+		node.position = Vector3(x, terrain.height(x, z) + h, z)
+		node.look_at(Vector3(sx, node.position.y, sp.y), Vector3.UP, true)
+		var data := {"kind": "target", "id": "target_%d" % (i + 1), "title": "هدف"}
+		var it := {"data": data, "node": node, "done": false, "base_y": node.position.y, "home": node.position}
+		items.append(it)
+		var moves := amp > 0.0 and i % 2 == 1   # every second target slides sideways (challenge only)
+		targets.append({"node": node, "base": node.position, "amp": amp if moves else 0.0, "speed": spd, "phase": float(i) * 1.9, "radius": radius, "item": it, "hit": false})
+
+# ---------- chase (chapter 8): run through the glowing gaps before the mist reaches you ----------
+
+func _build_chase() -> void:
+	chase = ChaseController.new()
+	chase.build(level_root, terrain, level, GameState.difficulty)
+
+func _update_chase(delta: float) -> void:
+	if chase == null:
+		return
+	var result := chase.step(delta, player.global_position)
+	if result == "caught":
+		mistakes += 1
+		_msg("chase_caught", 3.0)
+		_respawn(false)
+	elif result == "escaped":
+		for it in items:
+			if str((it["data"] as Dictionary)["kind"]) == "escape" and not bool(it["done"]):
+				_mark_done(it)
+		_msg("chase_safe", 3.5)
+		_check_finish()
+
+# ---------- wind course (chapter 9): wait, then cross each moving gust ----------
+
+func _build_wind_course() -> void:
+	wind_course = WindCourseController.new()
+	wind_course.build(level_root, terrain, level)
+
+func _update_wind_course(delta: float) -> void:
+	if wind_course == null:
+		return
+	var result := wind_course.step(delta, player.global_position)
+	if result == "caught":
+		mistakes += 1
+		_msg("wind_caught", 3.0)
+		_respawn(false)
+	elif result == "checkpoint":
+		# The player has already crossed a gust on ordinary terrain, so this is
+		# a static and safe checkpoint for the next timing challenge.
+		checkpoint = player.global_position + Vector3(0, 0.4, 0)
+	elif result == "escaped":
+		for it in items:
+			if str((it["data"] as Dictionary)["kind"]) == "wind_finish" and not bool(it["done"]):
+				_mark_done(it)
+		_msg("wind_safe", 3.5)
+		_check_finish()
+
+# ---------- rolling course (chapter 10): physically guide a clay ball ----------
+
+func _build_rolling_course() -> void:
+	rolling_course = RollingCourseController.new()
+	rolling_course.build(level_root, terrain, level)
+
+func _update_rolling_course() -> void:
+	if rolling_course == null:
+		return
+	var result := rolling_course.step()
+	if result == "lost":
+		_msg("roll_lost", 3.5)
+	elif result == "finished":
+		for it in items:
+			if str((it["data"] as Dictionary)["kind"]) == "roll_finish" and not bool(it["done"]):
+				_mark_done(it)
+		_msg("roll_safe", 3.5)
+		_check_finish()
+
+# ---------- turning bridge (chapter 11): balance across rotating beams ----------
+
+func _build_turning_bridge() -> void:
+	turning_bridge = TurningBridgeController.new()
+	turning_bridge.build(level_root, terrain, level)
+
+func _update_turning_bridge(delta: float) -> void:
+	if turning_bridge == null:
+		return
+	var result := turning_bridge.step(delta, player.global_position)
+	if result == "crossed":
+		for it in items:
+			if str((it["data"] as Dictionary)["kind"]) == "turn_finish" and not bool(it["done"]):
+				_mark_done(it)
+		_msg("turning_safe", 3.5)
+		_check_finish()
+
+# ---------- lamp road (chapter 12): carry a lamp with calm steps ----------
+
+func _build_lamp_road() -> void:
+	lamp_carry = LampCarryController.new()
+	lamp_carry.build(level_root, terrain, level)
+
+func _update_lamp_road(delta: float) -> void:
+	if lamp_carry == null:
+		return
+	var result := lamp_carry.step(delta, player.global_position, player.velocity, player.is_on_floor(), player.art.rotation.y)
+	if result == "refill" or result == "station":
+		checkpoint = lamp_carry.last_station + Vector3(0, 1.2, 0)
+	match result:
+		"refill":
+			_msg("lamp_refill", 3.0)
+		"warn":
+			_msg("lamp_warn", 3.0)
+		"low":
+			_msg("lamp_low", 4.0)
+		"out":
+			mistakes += 1
+			if lamp_carry.last_station == Vector3.ZERO:
+				checkpoint = spawn_point
+			_respawn(false)
+			lamp_carry.after_out()
+			_msg("lamp_out", 4.0)
+		"arrived":
+			for it in items:
+				if str((it["data"] as Dictionary)["kind"]) == "lamp_finish" and not bool(it["done"]):
+					_mark_done(it)
+			_msg("lamp_safe", 3.5)
+			_check_finish()
+
+# ---------- mosaic court (chapter 13): repeat the lit order by standing on tiles ----------
+
+func _build_mosaic() -> void:
+	mosaic = MosaicCourtController.new()
+	mosaic.build(level_root, terrain, level)
+
+func _update_mosaic(delta: float) -> void:
+	if mosaic == null:
+		return
+	var result := mosaic.step(delta, player.global_position, player.is_on_floor())
+	match result:
+		"watch":
+			_msg("mosaic_watch", 4.0)
+		"replay":
+			_msg("mosaic_replay", 2.5)
+		"right":
+			_msg("mosaic_right", 1.5)
+		"wrong":
+			mistakes += 1
+			_msg("mosaic_wrong", 3.0)
+		"solved":
+			for it in items:
+				if str((it["data"] as Dictionary)["kind"]) == "mosaic_finish" and not bool(it["done"]):
+					_mark_done(it)
+			_msg("mosaic_solved", 3.5)
+			_check_finish()
+
+# ---------- mirror hall (chapter 14): turn mirrors by standing on discs until the beam reaches the lantern ----------
+
+func _build_mirror_hall() -> void:
+	mirror_hall = MirrorHallController.new()
+	mirror_hall.build(level_root, terrain, level)
+
+func _update_mirror_hall(delta: float) -> void:
+	if mirror_hall == null:
+		return
+	var result := mirror_hall.step(delta, player.global_position, player.is_on_floor())
+	match result:
+		"watch":
+			_msg("mirror_watch", 4.0)
+		"solved":
+			for it in items:
+				if str((it["data"] as Dictionary)["kind"]) == "mirror_finish" and not bool(it["done"]):
+					_mark_done(it)
+			_msg("mirror_solved", 3.5)
+			_check_finish()
+
+# ---------- night watch (chapter 15): cross beams of light, rest in shade ----------
+
+func _build_night_watch() -> void:
+	night_watch = NightWatchController.new()
+	night_watch.build(level_root, terrain, level)
+
+func _update_night_watch(delta: float) -> void:
+	if night_watch == null:
+		return
+	var result := night_watch.step(delta, player.global_position, player.is_on_floor())
+	if night_watch.last_zone >= 0:
+		checkpoint = night_watch.zone_center(night_watch.last_zone) + Vector3(0, 1.2, 0)
+	match result:
+		"watch":
+			_msg("watch_start", 5.0)
+		"seen":
+			mistakes += 1
+			if night_watch.last_zone < 0:
+				checkpoint = spawn_point
+			_respawn(false)
+			night_watch.after_seen()
+			_msg("watch_seen", 4.0)
+		"arrived":
+			for it in items:
+				if str((it["data"] as Dictionary)["kind"]) == "watch_finish" and not bool(it["done"]):
+					_mark_done(it)
+			_msg("watch_safe", 3.5)
+			_check_finish()
+
+func _aim_ray() -> Dictionary:
+	var cam := player.camera
+	return {"origin": cam.global_position, "dir": -cam.global_transform.basis.z}
+
+## The arrow leaves the player's chest and converges on the crosshair ray at the depth of the target
+## the crosshair is closest to, so what you aim at is what you hit (moving targets need a lead).
+func _shoot() -> void:
+	if not level_active or not level.has("archery") or hud.is_modal_open() or shoot_cooldown > 0.0 or finished:
+		return
+	shoot_cooldown = SHOOT_COOLDOWN
+	arrows_fired += 1
+	var ray := _aim_ray()
+	var o: Vector3 = ray["origin"]
+	var dir: Vector3 = ray["dir"]
+	var assist := float(((level["archery"] as Dictionary)["assist"] as Array)[GameState.difficulty])
+	var aim := o + dir * 45.0
+	var best_angle := 0.3   # radians: only targets roughly in front of the crosshair count
+	for t in targets:
+		if bool(t["hit"]):
+			continue
+		var c: Vector3 = (t["node"] as Node3D).global_position
+		var rel := c - o
+		var along := rel.dot(dir)
+		if along < 3.0:
+			continue
+		var off := (rel - dir * along).length()
+		if off / along < best_angle:
+			best_angle = off / along
+			aim = c if off <= float(t["radius"]) * assist and assist > 1.0 else o + dir * along
+	var from := player.global_position + Vector3(0, 1.5, 0)
+	var vel := (aim - from).normalized() * ARROW_SPEED
+	player.art.rotation.y = atan2(vel.x, vel.z)
+	var node := PropFactory.make_arrow()
+	level_root.add_child(node)
+	node.global_position = from
+	node.look_at(from + vel)
+	# The supplied recordings are two complementary parts of a bow shot. The
+	# release starts immediately; the flight sound follows once the arrow is
+	# visibly clear of the character.
+	AudioManager.play_sfx("bow_draw_release")
+	arrows.append({"node": node, "pos": from, "vel": vel, "age": 0.0, "flight_sfx": false})
+
+func _update_archery(delta: float) -> void:
+	if not level.has("archery"):
+		return
+	archery_time += delta
+	shoot_cooldown = maxf(0.0, shoot_cooldown - delta)
+	for t in targets:
+		if bool(t["hit"]) or float(t["amp"]) == 0.0:
+			continue
+		var n: Node3D = t["node"]
+		var b: Vector3 = t["base"]
+		n.position.x = b.x + sin(archery_time * float(t["speed"]) + float(t["phase"])) * float(t["amp"])
+	for k in range(arrows.size() - 1, -1, -1):
+		var a: Dictionary = arrows[k]
+		var n: Node3D = a["node"]
+		if not is_instance_valid(n):
+			arrows.remove_at(k)
+			continue
+		a["age"] = float(a["age"]) + delta
+		if not bool(a["flight_sfx"]) and float(a["age"]) >= 0.08:
+			a["flight_sfx"] = true
+			AudioManager.play_sfx("bow_shot", 0.7)
+		if bool(a.get("stuck", false)):
+			if float(a["age"]) > 2.0:
+				n.queue_free()
+				arrows.remove_at(k)
+			continue
+		var p0: Vector3 = a["pos"]
+		var p1: Vector3 = p0 + (a["vel"] as Vector3) * delta
+		var hit := _arrow_target(p0, p1)
+		if not hit.is_empty():
+			arrows.remove_at(k)
+			_target_hit(hit, n)
+			continue
+		a["pos"] = p1
+		n.global_position = p1
+		if p1.y <= terrain.height(p1.x, p1.z) or float(a["age"]) > 2.5:
+			a["stuck"] = true   # sticks into the ground for a moment
+			a["age"] = 0.0
+
+func _arrow_target(p0: Vector3, p1: Vector3) -> Dictionary:
+	var d := p1 - p0
+	var l2 := d.length_squared()
+	for t in targets:
+		if bool(t["hit"]):
+			continue
+		var c: Vector3 = (t["node"] as Node3D).global_position
+		var u := 0.0 if l2 < 0.000001 else clampf((c - p0).dot(d) / l2, 0.0, 1.0)
+		if (p0 + d * u).distance_to(c) <= float(t["radius"]):
+			return t
+	return {}
+
+func _target_hit(t: Dictionary, arrow: Node3D) -> void:
+	t["hit"] = true
+	var node: Node3D = t["node"]
+	arrow.reparent(node, true)   # the arrow stays stuck in the target
+	for i in range(4):
+		var ring := node.get_node_or_null("Ring%d" % i) as MeshInstance3D
+		if ring:
+			var m := StandardMaterial3D.new()
+			m.albedo_color = Color("#3fd16a") if i % 2 == 1 else Color("#bff0c9")
+			m.emission_enabled = true
+			m.emission = m.albedo_color
+			m.emission_energy_multiplier = 0.9
+			ring.material_override = m
+	var burst := PropFactory.make_burst(Color("#8fe39a"))
+	burst.position = node.global_position
+	level_root.add_child(burst)
+	get_tree().create_timer(2.0).timeout.connect(burst.queue_free)
+	var tw := create_tween()
+	node.scale = Vector3.ONE * 1.25
+	tw.tween_property(node, "scale", Vector3.ONE, 0.35).set_trans(Tween.TRANS_BACK)
+	_mark_done(t["item"])
+	var left := 0
+	for o in targets:
+		if not bool(o["hit"]):
+			left += 1
+	if left > 0:
+		_msg("target_hit", 2.0)
+	_check_finish()
+
+## Stars from accuracy: arrows per target (2.5 or fewer = 3 stars).
+func _archery_mistakes() -> int:
+	var per := float(arrows_fired) / float(maxi(targets.size(), 1))
+	return 0 if per <= 2.5 else (1 if per <= 4.5 else 3)
+
+## Where a stone is right now (moving stones slide, the rest never move).
+func stone_now(i: int) -> Vector3:
+	if moving_stones.has(i):
+		var m: Dictionary = moving_stones[i]
+		if is_instance_valid(m["body"]):
+			return (m["body"] as Node3D).global_position
+	return chain_position(i)
+
+func _physics_process(delta: float) -> void:
+	if not level_active:
+		return
+	_update_archery(delta)
+	_update_chase(delta)
+	_update_wind_course(delta)
+	_update_rolling_course()
+	_update_turning_bridge(delta)
+	_update_lamp_road(delta)
+	_update_mosaic(delta)
+	_update_mirror_hall(delta)
+	_update_night_watch(delta)
+	if moving_stones.is_empty():
+		return
+	chain_time += delta
+	var ch: Dictionary = level["chain"]
+	var amp := float(ch.get("move_amp", 0.0))
+	var spd := float(ch.get("move_speed", 0.0))
+	for i in moving_stones:
+		var m: Dictionary = moving_stones[i]
+		if is_instance_valid(m["body"]):
+			(m["body"] as Node3D).position = (m["base"] as Vector3) + Vector3(sin(chain_time * spd + float(m["phase"])) * amp, 0, 0)
+
+func _build_ambient_particles() -> void:
+	var p := CPUParticles3D.new()
+	p.amount = 70
+	p.lifetime = 7.0
+	p.preprocess = 7.0
+	p.emission_shape = CPUParticles3D.EMISSION_SHAPE_BOX
+	p.emission_box_extents = Vector3(22, 6, 22)
+	p.direction = Vector3(1, 0.2, 0.3)
+	p.spread = 60.0
+	p.initial_velocity_min = 0.2
+	p.initial_velocity_max = 0.7
+	p.gravity = Vector3(0, -0.02, 0)
+	var qm := QuadMesh.new()
+	qm.size = Vector2(0.07, 0.07)
+	var m := StandardMaterial3D.new()
+	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	m.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
+	m.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+	m.albedo_color = Color(1.0, 0.95, 0.75, 0.7)
+	# soft round dot instead of a hard square
+	var grad := Gradient.new()
+	grad.set_color(0, Color(1, 1, 1, 1))
+	grad.set_color(1, Color(1, 1, 1, 0))
+	var tex := GradientTexture2D.new()
+	tex.gradient = grad
+	tex.fill = GradientTexture2D.FILL_RADIAL
+	tex.fill_from = Vector2(0.5, 0.5)
+	tex.fill_to = Vector2(1.0, 0.5)
+	tex.width = 32
+	tex.height = 32
+	m.albedo_texture = tex
+	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	qm.size = Vector2(0.16, 0.16)
+	p.mesh = qm
+	p.material_override = m
+	p.position = Vector3(0, 3.0, 0)
+	player.add_child(p)
+	p.name = "Motes"
+	if player.has_node("Motes_old"):
+		player.get_node("Motes_old").queue_free()
+
+# ---------- interactables ----------
+
+func _ground_pos(offset_pos: Vector2) -> Vector3:
+	var z := offset_pos.y
+	var x := terrain.path_x(z) + offset_pos.x
+	if level.has("nest") and not (bool(level.get("hall", false))):
+		x = offset_pos.x
+	return Vector3(x, terrain.height(x, z), z)
+
+func _build_interactables() -> void:
+	for d in level["interactables"]:
+		var data: Dictionary = d
+		var pos: Vector3
+		if data.has("on_chain"):
+			pos = chain_position(int(data["on_chain"])) + Vector3(0, 1.1, 0)
+		else:
+			pos = _ground_pos(data["pos"])
+		var node: Node3D
+		match str(data["kind"]):
+			"clue":
+				node = PropFactory.make_clue_marker("banner" if str(data["id"]).begins_with("banner") else "clue")
+				if not str(data["id"]).begins_with("banner"):
+					pos += Vector3(0, 0.9, 0)
+			"brazier":
+				node = PropFactory.make_brazier(Color(str(data["color"])))
+			"log":
+				node = PropFactory.make_log()
+			"quiz":
+				node = PropFactory.make_pedestal()
+			"scale":
+				node = Node3D.new()   # logical anchor; the pans, beam and gate are built by _build_scale_gate()
+			"escape":
+				node = PropFactory.make_clue_marker("clue")
+				pos += Vector3(0, 0.9, 0)
+			"wind_finish":
+				node = PropFactory.make_clue_marker("clue")
+				pos += Vector3(0, 0.9, 0)
+			"roll_finish":
+				node = PropFactory.make_clue_marker("clue")
+				pos += Vector3(0, 0.9, 0)
+			"turn_finish", "lamp_finish", "mosaic_finish", "mirror_finish", "watch_finish":
+				node = PropFactory.make_clue_marker("clue")
+				pos += Vector3(0, 0.9, 0)
+			"npc":
+				match str(data["id"]):
+					"simorgh":
+						node = PropFactory.make_simorgh()
+						node.scale = Vector3.ONE * 1.5
+						pos += Vector3(0, 3.4, 0)
+						simorgh = node
+					"sam":
+						node = PropFactory.make_figure(Color("#6d3b2e"), Color("#cfcfcf"), true)
+					"mobed":
+						node = PropFactory.make_figure(Color("#e6dfcf"), Color("#d8d4c8"), true)
+					"gatekeeper":
+						node = PropFactory.make_figure(Color("#3b4a5a"), Color("#a8a39a"), true)
+					_:
+						node = PropFactory.make_stone_tablet()
+		node.position = pos
+		level_root.add_child(node)
+		if str(data["kind"]) == "npc" and str(data["id"]) in ["sam", "mobed", "gatekeeper"]:
+			node.look_at(Vector3(pos.x, pos.y, pos.z + 10.0))
+		items.append({"data": data, "node": node, "done": false, "base_y": pos.y, "home": pos})
+
+func _non_finale_items() -> Array[Dictionary]:
+	var out: Array[Dictionary] = []
+	for it in items:
+		var d: Dictionary = it["data"]
+		if not bool(d.get("finale", false)) and str(d["kind"]) != "log":   # logs are tools, not goals
+			out.append(it)
+	return out
+
+func _required_done() -> bool:
+	for it in _non_finale_items():
+		if not bool(it["done"]):
+			return false
+	return true
+
+func _refresh_progress() -> void:
+	var req := _non_finale_items()
+	var done_count := 0
+	for it in req:
+		if bool(it["done"]):
+			done_count += 1
+	hud.set_progress(str(level["progress_label"]), done_count, req.size())
+
+func _nearest_item(only_kind: String = "") -> Dictionary:
+	var best: Dictionary = {}
+	var best_d := interact_radius
+	for it in items:
+		if bool(it["done"]) and str((it["data"] as Dictionary)["kind"]) != "brazier":
+			continue
+		var kind_here := str((it["data"] as Dictionary)["kind"])
+		if only_kind != "" and kind_here != only_kind:
+			continue
+		if only_kind == "" and kind_here not in TALK_KINDS:
+			continue   # the interact button is for conversation only
+		var node: Node3D = it["node"]
+		if not is_instance_valid(node):
+			continue
+		var a := player.global_position
+		var b := node.global_position
+		var dist := Vector2(a.x - b.x, a.z - b.z).length()
+		if dist < best_d and absf(a.y - b.y) < 7.0:
+			best_d = dist
+			best = it
+	return best
+
+func _interact() -> void:
+	## Interact is for conversation only (NPCs and question pedestals).
+	if not level_active or hud.is_modal_open():
+		return
+	var it := _nearest_item()
+	if it.is_empty():
+		_msg("nothing_to_talk", 3.0)
+		return
+	var d: Dictionary = it["data"]
+	match str(d["kind"]):
+		"quiz":
+			hud.show_quiz(d, func(correct: bool, finished_q: bool) -> void:
+				if not correct:
+					mistakes += 1
+				if finished_q:
+					_mark_done(it)
+					_set_pedestal_done(it)
+					_check_finish())
+		"npc":
+			if bool(d.get("finale", false)) and not _required_done():
+				_say(str(d["hint"]), "%s__%s_locked" % [str(level["id"]), str(d["id"])], 3.5)
+				return
+			hud.show_dialogue(str(d["speaker"]), d["lines"], d.get("choices", []), d.get("after", []), func() -> void:
+				_mark_done(it)
+				_finish_level(), str(d["id"]))
+
+## Physical actions: walking into things picks them up / delivers them. Edge-triggered
+## (fires when the player ENTERS the radius) so nothing repeats while standing still.
+func _auto_actions() -> void:
+	if not level_active or hud.is_modal_open():
+		return
+	for it in items:
+		var d: Dictionary = it["data"]
+		var kind := str(d["kind"])
+		if not AUTO_RADIUS.has(kind):
+			continue
+		var node: Node3D = it["node"]
+		if not is_instance_valid(node):
+			it["inside"] = false
+			continue
+		var a := player.global_position
+		var b := node.global_position
+		var inside := Vector2(a.x - b.x, a.z - b.z).length() < float(AUTO_RADIUS[kind]) and absf(a.y - b.y) < 3.2
+		var was := bool(it.get("inside", false))
+		it["inside"] = inside
+		if not inside or was:
+			continue
+		match kind:
+			"clue":
+				if not bool(it["done"]):
+					_collect(it)
+					hud.toast(str(d["hint"]), 4.0)
+					if GameState.voice_mode == 2:
+						AudioManager.play_voice("%s__hint_%s" % [str(level["id"]), str(d["id"])])
+					_check_finish()
+			"log":
+				if not bool(it["done"]) and carrying.is_empty():
+					_pick_log(it)
+			"brazier":
+				if bool(it["done"]):
+					continue
+				if not carrying.is_empty() or not _has_logs():
+					_use_brazier(it)
+				else:
+					_msg("need_log", 3.5)
+
+func _collect(it: Dictionary) -> void:
+	var node: Node3D = it["node"]
+	if is_instance_valid(node):
+		var burst := PropFactory.make_burst()
+		burst.position = node.global_position
+		level_root.add_child(burst)
+		get_tree().create_timer(2.0).timeout.connect(burst.queue_free)
+		node.queue_free()
+		it["node"] = null   # a freed node must not stay referenced by _process
+	_mark_done(it)
+
+func _mark_done(it: Dictionary) -> void:
+	it["done"] = true
+	_refresh_progress()
+
+func _set_pedestal_done(it: Dictionary) -> void:
+	var node: Node3D = it["node"]
+	if is_instance_valid(node):
+		var burst := PropFactory.make_burst(Color("#8fe39a"))
+		burst.position = node.global_position + Vector3(0, 1.6, 0)
+		level_root.add_child(burst)
+		get_tree().create_timer(2.0).timeout.connect(burst.queue_free)
+
+## Shows a message and, in automatic narration mode, speaks it when a recording exists.
+func _say(text: String, voice_key: String, seconds: float) -> void:
+	hud.toast(text, seconds)
+	if GameState.voice_mode == 2:
+		AudioManager.play_voice(voice_key)
+
+func _msg(id: String, seconds: float) -> void:
+	_say(str(GameMessages.TEXT[id]), "game__" + id, seconds)
+
+func _has_logs() -> bool:
+	for it in items:
+		if str((it["data"] as Dictionary)["kind"]) == "log":
+			return true
+	return false
+
+func _pick_log(it: Dictionary) -> void:
+	carrying = it
+	it["done"] = true   # hidden from "nearest item" while carried
+	var node: Node3D = it["node"]
+	node.reparent(player, false)
+	node.position = Vector3(0, 2.3, 0)
+	node.rotation = Vector3.ZERO
+	player.run_speed = base_run_speed * float(DifficultyRules.CARRY_SPEED[GameState.difficulty])
+	_msg("log_carry", 4.5)
+
+func _release_log() -> void:
+	carrying = {}
+	player.run_speed = base_run_speed
+
+func _drop_log() -> void:
+	var it := carrying
+	var node: Node3D = it["node"]
+	var x := player.global_position.x
+	var z := player.global_position.z
+	node.reparent(level_root, false)
+	node.position = Vector3(x, terrain.height(x, z), z)
+	it["done"] = false
+	_release_log()
+	_msg("log_drop", 2.0)
+
+## Wrong fire: the wood is not lost, it goes back where it was found.
+func _return_log() -> void:
+	var it := carrying
+	var node: Node3D = it["node"]
+	node.reparent(level_root, false)
+	node.position = it["home"]
+	it["done"] = false
+	_release_log()
+
+func _use_brazier(it: Dictionary) -> void:
+	var d: Dictionary = it["data"]
+	if bool(it["done"]):
+		hud.toast("این آتش پیش‌تر روشن شده است.", 2.0)
+		return
+	if _has_logs() and carrying.is_empty():
+		_msg("need_log", 3.5)
+		return
+	if int(d["order"]) == brazier_next:
+		brazier_next += 1
+		if not carrying.is_empty():
+			(carrying["node"] as Node3D).queue_free()   # the wood burns
+			carrying["node"] = null   # never keep a freed node in an item (typed reads would error)
+			_release_log()
+		_mark_done(it)
+		var node: Node3D = it["node"]
+		var flame := PropFactory.make_flame(Color(str(d["color"])))
+		node.add_child(flame)
+		_say(GameMessages.FIRE_LIT % str(d["title"]), "%s__fire_lit_%s" % [str(level["id"]), str(d["id"])], 2.5)
+		_check_finish()
+	else:
+		mistakes += 1
+		brazier_next = 0
+		if not carrying.is_empty():
+			_return_log()
+		for other in items:
+			if str((other["data"] as Dictionary)["kind"]) == "brazier":
+				other["done"] = false
+				var n: Node3D = other["node"]
+				var fl := n.get_node_or_null("Flame")
+				if fl:
+					fl.queue_free()
+		_refresh_progress()
+		_say(GameMessages.wrong_order(level), str(level.get("voice_order_wrong", "%s__order_wrong" % str(level["id"]))), 5.0)
+
+func _check_finish() -> void:
+	if finished:
+		return
+	if _required_done():
+		var has_finale := false
+		for it in items:
+			if bool((it["data"] as Dictionary).get("finale", false)):
+				has_finale = true
+		if has_finale:
+			hud.set_objective("اکنون به سراغ «%s» برو و با او سخن بگو." % _finale_title())
+			_say(GameMessages.GO_FINALE % _finale_title(), "%s__go_finale" % str(level["id"]), 5.0)
+		else:
+			_finish_level()
+
+func _finale_title() -> String:
+	for it in items:
+		var d: Dictionary = it["data"]
+		if bool(d.get("finale", false)):
+			return str(d["title"])
+	return ""
+
+func _finish_level() -> void:
+	if finished:
+		return
+	finished = true
+	if level.has("archery"):
+		mistakes = _archery_mistakes()
+	var stars := 3 if mistakes == 0 else (2 if mistakes <= 2 else 1)
+	var k: Dictionary = level["knowledge"]
+	GameState.complete_level(level_index, stars, str(k["id"]))
+	var has_next := level_index + 1 < LevelData.LEVELS.size()
+	hud.show_level_complete(level, stars, has_next, func() -> void: load_level(level_index + 1))
+
+# ---------- per-frame ----------
+
+func _process(delta: float) -> void:
+	if not level_active:
+		return
+	var t := Time.get_ticks_msec() * 0.001
+	var moving := Vector2(player.velocity.x, player.velocity.z).length() > 0.5 and player.is_on_floor()
+	PropFactory.animate_zal(player.art, moving, t)
+	if player.global_position.y < kill_y:
+		_respawn()
+	if level.has("chain") and player.is_on_floor():
+		_update_platform_checkpoint()
+	if turning_bridge and player.is_on_floor():
+		var rest := turning_bridge.static_checkpoint(player.global_position)
+		if rest != Vector3.ZERO:
+			checkpoint = rest
+	_auto_actions()
+	_update_bridge()
+	_update_scale(delta)
+	var near := _nearest_item()
+	hud.set_interact_ready(not near.is_empty())
+	var river_dist := -1.0
+	if level.has("river"):
+		river_dist = absf(player.global_position.x - terrain.river_x(player.global_position.z))
+	AudioManager.update_ambience(level, player.global_position.y, river_dist)
+	for it in items:
+		var node: Node3D = it["node"]
+		if not is_instance_valid(node):
+			continue
+		var kind := str((it["data"] as Dictionary)["kind"])
+		if kind == "clue" and not str((it["data"] as Dictionary)["id"]).begins_with("banner"):
+			var ring := node.get_node_or_null("Ring")
+			if ring:
+				(ring as Node3D).rotation.y = t * 1.6
+				(ring as Node3D).rotation.x = 1.1
+			node.position.y = float(it["base_y"]) + sin(t * 2.0 + node.position.x) * 0.12
+		if kind == "clue" and beam_range < 1000.0:
+			var beam := node.get_node_or_null("Beam")
+			if beam:
+				(beam as Node3D).visible = player.global_position.distance_to(node.global_position) < beam_range
+	if simorgh:
+		simorgh.position.y = float(items[_simorgh_index()]["base_y"]) + sin(t * 1.1) * 0.35
+		PropFactory.animate_simorgh(simorgh, t)
+		simorgh.look_at(Vector3(player.global_position.x, simorgh.global_position.y, player.global_position.z), Vector3.UP, true)
+	for c in clouds:
+		var parent := c.get_parent() as Node3D
+		parent.position.x += float(parent.get_meta("speed")) * delta
+		if parent.position.x > 200.0:
+			parent.position.x = -200.0
+
+func _simorgh_index() -> int:
+	for i in range(items.size()):
+		if (items[i]["data"] as Dictionary)["id"] == "simorgh":
+			return i
+	return 0
+
+func _respawn(show_fall_message: bool = true) -> void:
+	player.global_position = checkpoint
+	player.velocity = Vector3.ZERO
+	if chase:
+		chase.reset(checkpoint)
+	if show_fall_message:
+		_msg("fall", 3.0)
+
+func _update_platform_checkpoint() -> void:
+	var ch: Dictionary = level["chain"]
+	for i in range(int(ch["count"])):
+		if moving_stones.has(i):
+			continue   # never respawn onto a stone that has slid away
+		var p := stone_now(i)
+		var horizontal := Vector2(player.global_position.x - p.x, player.global_position.z - p.z).length()
+		if horizontal <= 1.45 and absf(player.global_position.y - p.y) <= 1.9:
+			checkpoint = player.global_position
+			return
+
+# ---------- self test (CI) ----------
+
+func _report_missing_voice() -> void:
+	# Informational only: lists narration lines that have no audio file yet (see VoiceLines).
+	var base_total := 0
+	var base_missing := 0
+	var new_total := 0
+	var new_missing := 0
+	for row in VoiceLines.all_lines():
+		var missing := AudioManager.voice_path(str(row["key"])) == ""
+		if bool(row["base"]):
+			base_total += 1
+			base_missing += 1 if missing else 0
+		else:
+			new_total += 1
+			new_missing += 1 if missing else 0
+		if missing:
+			print("VOICE missing: ", row["key"])
+	print("VOICE coverage: %d/%d (original) | new lines: %d/%d" % [base_total - base_missing, base_total, new_total - new_missing, new_total])
+
+func _run_selftest() -> void:
+	var failures := 0
+	_report_missing_voice()
+	# developer filters: --only=<level index>  --diff=<0..2>
+	var only := int(_arg_value("--only")) if _arg_value("--only") != "" else -1
+	var only_diff := int(_arg_value("--diff")) if _arg_value("--diff") != "" else -1
+	for diff in range(3):
+		if only_diff >= 0 and diff != only_diff:
+			continue
+		GameState.difficulty = diff
+		for i in range(LevelData.LEVELS.size()):
+			if only >= 0 and i != only:
+				continue
+			failures += await _selftest_level(i)
+	GameState.difficulty = 1
+	hud.show_main_menu()
+	await get_tree().process_frame
+	await get_tree().process_frame
+	if not hud.selftest_modal_fits():
+		print("  main menu does not fit/scroll on screen")
+		failures += 1
+	hud.close_all_modals()
+	# settings opened from the pause menu: "بازگشت" must return to the pause menu (regression)
+	hud.show_pause_menu()
+	hud.show_settings(hud.show_pause_menu)
+	hud.selftest_press_last_button()
+	if hud.modal_stack.size() != 1:
+		print("  settings back button did not return to the pause menu")
+		failures += 1
+	hud.close_all_modals()
+	hud.show_pause_menu()
+	hud.close_all_modals()
+	hud.show_knowledge_list()
+	hud.close_all_modals()
+	print("SELFTEST ", "OK" if failures == 0 else "FAILED (%d)" % failures)
+	get_tree().quit(0 if failures == 0 else 1)
+
+func _selftest_level(i: int) -> int:
+	var failures := 0
+	load_level(i, false)
+	await get_tree().process_frame
+	await get_tree().physics_frame
+	if _has_logs():
+		failures += await _selftest_logs()
+	if level.has("chase"):
+		# Run the physical course before generic completion marks every goal done.
+		failures += await _selftest_chase()
+	if level.has("wind_course"):
+		failures += await _selftest_wind_course()
+	if level.has("rolling_course"):
+		failures += await _selftest_rolling_course()
+	if level.has("turning_bridge"):
+		failures += await _selftest_turning_bridge()
+	if level.has("lamp_road"):
+		failures += await _selftest_lamp_road()
+	if level.has("mosaic"):
+		failures += await _selftest_mosaic()
+	if level.has("light"):
+		failures += await _selftest_mirror_hall()
+	if level.has("night_watch"):
+		failures += await _selftest_night_watch()
+	for it in items:
+		if not bool((it["data"] as Dictionary).get("finale", false)):
+			it["done"] = true
+	if not _required_done():
+		failures += 1
+	failures += _selftest_difficulty_sanity()
+	# exercise every UI path once
+	for it in items:
+		var d: Dictionary = it["data"]
+		match str(d["kind"]):
+			"quiz":
+				hud.show_quiz(d, func(_a: bool, _b: bool) -> void: pass)
+				hud.close_all_modals()
+			"npc":
+				hud.show_dialogue(str(d["speaker"]), d["lines"], d.get("choices", []), d.get("after", []), func() -> void: pass)
+				hud.close_all_modals()
+	if not moving_stones.is_empty():
+		failures += await _selftest_carry()
+	if level.has("bridge"):
+		failures += await _selftest_bridge()
+	if level.has("scale"):
+		failures += await _selftest_scale()
+	if level.has("archery"):
+		failures += await _selftest_archery()
+	await get_tree().create_timer(0.3).timeout
+	# the player must stand on the terrain after a short settle
+	for _f in range(40):
+		await get_tree().physics_frame
+	var standing := player.is_on_floor()
+	print("level %d (%s): items=%d on_floor=%s y=%.2f" % [i, level["id"], items.size(), standing, player.global_position.y])
+	if not standing:
+		failures += 1
+	_finish_level()
+	hud.close_all_modals()
+	finished = false
+	return failures
+
+## Firewood flow (automatic, no interact button): no wood = no fire; the correct fire burns the wood;
+## a wrong fire returns it and resets the order.
+func _selftest_logs() -> int:
+	var bad := 0
+	var logs: Array = []
+	var fires: Dictionary = {}
+	for it in items:
+		var d: Dictionary = it["data"]
+		if str(d["kind"]) == "log":
+			logs.append(it)
+		elif str(d["kind"]) == "brazier":
+			fires[int(d["order"])] = it
+	var far := Vector3(player.global_position.x, player.global_position.y, player.global_position.z + 40.0)
+	player.global_position = (fires[0]["node"] as Node3D).global_position + Vector3(1.0, 0.5, 0)
+	_auto_actions()   # no wood: must NOT light the fire
+	if bool(fires[0]["done"]) or brazier_next != 0:
+		bad += 1
+	player.global_position = (logs[0]["node"] as Node3D).global_position + Vector3(0.8, 0.5, 0)
+	_auto_actions()   # walk onto the log: picked up
+	if carrying.is_empty() or player.run_speed >= base_run_speed:
+		bad += 1
+	player.global_position = (fires[2]["node"] as Node3D).global_position + Vector3(1.0, 0.5, 0)
+	_auto_actions()   # wrong fire: wood returns, fires reset
+	if not carrying.is_empty() or bool(logs[0]["done"]) or brazier_next != 0:
+		bad += 1
+	player.global_position = far
+	_auto_actions()
+	player.global_position = (logs[0]["node"] as Node3D).global_position + Vector3(0.8, 0.5, 0)
+	_auto_actions()
+	player.global_position = (fires[0]["node"] as Node3D).global_position + Vector3(1.0, 0.5, 0)
+	_auto_actions()   # right fire: lit, wood burned
+	if not bool(fires[0]["done"]) or brazier_next != 1 or not carrying.is_empty():
+		bad += 1
+	# the interact button must NOT do any of the physical actions
+	_interact()
+	print("  log flow: %s" % ("ok" if bad == 0 else "FAILED (%d)" % bad))
+	player.global_position = spawn_point
+	return bad
+
+## Pushing a trunk into the slot builds the bridge, and the player can then walk across it.
+func _selftest_bridge() -> int:
+	var gap := _gap_info()
+	var need := bridge_need
+	var guard := 0
+	while bridge_delivered < need and guard < need + 2:
+		guard += 1
+		if trunks.is_empty():
+			break
+		var rb: RigidBody3D = trunks[0]
+		var start_z := rb.global_position.z + 2.1
+		player.global_position = Vector3(rb.global_position.x, terrain.height(rb.global_position.x, start_z) + 0.6, start_z)
+		player.velocity = Vector3.ZERO
+		var before := bridge_delivered
+		for _f in range(900):
+			await get_tree().physics_frame
+			if not is_instance_valid(rb) or bridge_delivered > before:
+				break
+			# Stay on the pushing side as the heavy trunk crosses uneven ground;
+			# otherwise a long test run can leave the bot rubbing its side.
+			var push_z := rb.global_position.z + 2.1
+			if player.global_position.distance_to(Vector3(rb.global_position.x, player.global_position.y, push_z)) > 2.5:
+				player.global_position = Vector3(rb.global_position.x, terrain.height(rb.global_position.x, push_z) + 0.6, push_z)
+				player.velocity = Vector3.ZERO
+			GameState.move_vector = Vector2(clampf((rb.global_position.x - player.global_position.x) * 0.8, -1.0, 1.0), -1.0)
+		GameState.move_vector = Vector2.ZERO
+		if bridge_delivered <= before:
+			print("  bridge: trunk %d never reached the bank (z=%.1f)" % [guard, rb.global_position.z if is_instance_valid(rb) else 0.0])
+			return 1
+	if not bridge_built:
+		print("  bridge: not built after delivering %d trunks" % bridge_delivered)
+		return 1
+	# walk across
+	var mid := float(gap["mid"])
+	var target := Vector2(terrain.path_x(float(gap["far"]) - 6.0), float(gap["far"]) - 6.0)
+	var near_pos := Vector2(terrain.path_x(float(gap["near"]) + 3.0), float(gap["near"]) + 3.0)
+	player.global_position = Vector3(near_pos.x, terrain.height(near_pos.x, near_pos.y) + 0.6, near_pos.y)
+	player.velocity = Vector3.ZERO
+	var crossed := false
+	for _f in range(900):
+		await get_tree().physics_frame
+		var d := target - Vector2(player.global_position.x, player.global_position.z)
+		if d.length() < 1.5 and player.is_on_floor():
+			crossed = true
+			break
+		if player.global_position.y < kill_y:
+			break
+		GameState.move_vector = d.normalized()
+	GameState.move_vector = Vector2.ZERO
+	print("  bridge: need=%d built=%s crossed=%s" % [need, bridge_built, crossed])
+	player.global_position = spawn_point
+	return 0 if crossed else 1
+
+## Archery bot: a stray arrow hits nothing, then every target is hit by really aiming the camera at it
+## (with a lead for sliding targets), so a human with the same crosshair can finish the level too.
+func _selftest_archery() -> int:
+	var bad := 0
+	var ac: Dictionary = level["archery"]
+	if targets.size() != int((ac["count"] as Array)[GameState.difficulty]):
+		bad += 1
+	for t in targets:
+		var p: Vector3 = (t["node"] as Node3D).global_position
+		if p.y < terrain.height(p.x, p.z) + 1.0 or absf(p.x) > float(level["valley_half"]) - 1.0:
+			print("  archery: target out of the field at ", p)
+			bad += 1
+	# 1) shooting at the sky must not hit anything
+	await _selftest_aim_at(player.global_position + Vector3(0, 40, -40), 0.0)
+	_shoot()
+	for _f in range(150):
+		await get_tree().physics_frame
+	for t in targets:
+		if bool(t["hit"]):
+			bad += 1
+	# 2) hit every target
+	for t in targets:
+		var tries := 0
+		while not bool(t["hit"]) and tries < 4:
+			tries += 1
+			while shoot_cooldown > 0.0:
+				await get_tree().physics_frame
+			var node: Node3D = t["node"]
+			var flight := node.global_position.distance_to(player.global_position) / ARROW_SPEED + 0.1
+			await _selftest_aim_at(_target_at(t, flight), flight)
+			_shoot()
+			for _f in range(90):
+				await get_tree().physics_frame
+				if bool(t["hit"]):
+					break
+		if not bool(t["hit"]):
+			bad += 1
+	var done_all := true
+	for t in targets:
+		if not bool(t["hit"]):
+			done_all = false
+	print("  archery: targets=%d arrows=%d all_hit=%s mistakes=%d" % [targets.size(), arrows_fired, done_all, _archery_mistakes()])
+	return bad
+
+## The bot follows each glowing gap like a child can. It proves that all three
+## difficulty variants reach the static refuge before the pursuer catches them.
+func _selftest_chase() -> int:
+	if chase == null:
+		print("  chase: controller missing")
+		return 1
+	var escaped := false
+	var mistakes_before := mistakes
+	for _frame in range(2600):
+		if chase.escaped:
+			escaped = true
+			break
+		var target := chase.guide_point(player.global_position)
+		var dx := clampf((target.x - player.global_position.x) * 0.42, -0.85, 0.85)
+		# PlayerController maps negative Y to forward / decreasing world Z.
+		GameState.move_vector = Vector2(dx, -1.0).normalized()
+		await get_tree().physics_frame
+	GameState.move_vector = Vector2.ZERO
+	var refuge_done := false
+	for it in items:
+		if str((it["data"] as Dictionary)["kind"]) == "escape":
+			refuge_done = bool(it["done"])
+	print("  chase: difficulty=%d escaped=%s refuge=%s mistakes=%d" % [GameState.difficulty, escaped, refuge_done, mistakes])
+	player.global_position = spawn_point
+	player.velocity = Vector3.ZERO
+	return 0 if escaped and refuge_done and mistakes == mistakes_before else 1
+
+## Wait before a gust, then cross when it has swept far from the central path.
+func _selftest_wind_course() -> int:
+	if wind_course == null:
+		print("  wind course: controller missing")
+		return 1
+	var mistakes_before := mistakes
+	var crossed := false
+	for _frame in range(2600):
+		if wind_course.escaped:
+			crossed = true
+			break
+		var gust := wind_course.next_gust(player.global_position)
+		var move := false
+		if gust.is_empty():
+			move = true
+		else:
+			var gz := float(gust["z"])
+			var gp := wind_course.gust_position(gust)
+			if player.global_position.z > gz + 3.0:
+				move = true
+			else:
+				# Cross while the gust is already travelling away from the route, giving
+				# the player the whole outward-and-return sweep as crossing time.
+				var sweep := float((level["wind_course"] as Dictionary)["sweep"])
+				move = absf(gp.x) > sweep * 0.65 and wind_course.is_moving_away_from_path(gust)
+		var dx := clampf(-player.global_position.x * 0.45, -0.7, 0.7)
+		GameState.move_vector = Vector2(dx, -1.0).normalized() if move else Vector2(dx, 0.0)
+		await get_tree().physics_frame
+	GameState.move_vector = Vector2.ZERO
+	var finish_done := false
+	for it in items:
+		if str((it["data"] as Dictionary)["kind"]) == "wind_finish":
+			finish_done = bool(it["done"])
+	var course_mistakes := mistakes - mistakes_before
+	print("  wind course: difficulty=%d escaped=%s finish=%s recoveries=%d" % [GameState.difficulty, crossed, finish_done, course_mistakes])
+	player.global_position = spawn_point
+	player.velocity = Vector3.ZERO
+	# A child may touch a gust while learning its rhythm; verify the static
+	# checkpoint recovery remains finite as well as verifying completion.
+	return 0 if crossed and finish_done and course_mistakes <= 3 else 1
+
+## Physically push the RigidBody3D through its rails; this proves the goal is
+## reachable without an Interact action at every difficulty.
+func _selftest_rolling_course() -> int:
+	if rolling_course == null or rolling_course.ball == null:
+		print("  rolling course: controller missing")
+		return 1
+	var ball := rolling_course.ball
+	var reached := false
+	for _frame in range(2100):
+		if rolling_course.completed:
+			reached = true
+			break
+		if not is_instance_valid(ball):
+			break
+		var behind_z := ball.global_position.z + 2.0
+		if player.global_position.distance_to(Vector3(ball.global_position.x, player.global_position.y, behind_z)) > 2.6:
+			player.global_position = Vector3(ball.global_position.x, terrain.height(ball.global_position.x, behind_z) + 0.6, behind_z)
+			player.velocity = Vector3.ZERO
+		GameState.move_vector = Vector2(clampf((ball.global_position.x - player.global_position.x) * 0.75, -1.0, 1.0), -1.0)
+		await get_tree().physics_frame
+	GameState.move_vector = Vector2.ZERO
+	var finish_done := false
+	for it in items:
+		if str((it["data"] as Dictionary)["kind"]) == "roll_finish":
+			finish_done = bool(it["done"])
+	print("  rolling course: difficulty=%d reached=%s finish=%s" % [GameState.difficulty, reached, finish_done])
+	player.global_position = spawn_point
+	player.velocity = Vector3.ZERO
+	return 0 if reached and finish_done else 1
+
+## Walk and jump across the real rotating collision bodies. The bot may only
+## resume after a fall from the last fixed rest pad, never from a beam.
+func _selftest_turning_bridge() -> int:
+	if turning_bridge == null:
+		print("  turning bridge: controller missing")
+		return 1
+	var recoveries := 0
+	var crossed := false
+	for _frame in range(2600):
+		if turning_bridge.crossed:
+			crossed = true
+			break
+		var target := turning_bridge.guide_point(player.global_position)
+		var d := Vector2(target.x - player.global_position.x, target.z - player.global_position.z)
+		if d.length() > 1.5:
+			GameState.move_vector = d.normalized()
+			if player.is_on_floor() and d.length() > 3.0:
+				player.request_jump()
+		else:
+			GameState.move_vector = Vector2(0, -1)
+		await get_tree().physics_frame
+		if player.global_position.y < kill_y:
+			recoveries += 1
+			_respawn(false)
+			if recoveries > 4:
+				break
+	GameState.move_vector = Vector2.ZERO
+	var finish_done := false
+	for it in items:
+		if str((it["data"] as Dictionary)["kind"]) == "turn_finish":
+			finish_done = bool(it["done"])
+	print("  turning bridge: difficulty=%d crossed=%s finish=%s recoveries=%d" % [GameState.difficulty, crossed, finish_done, recoveries])
+	player.global_position = spawn_point
+	player.velocity = Vector3.ZERO
+	return 0 if crossed and finish_done and recoveries <= 4 else 1
+
+## Sprinting must spill oil; a calm walker (stick half-way) must reach the tower with the real physics.
+func _selftest_lamp_road() -> int:
+	if lamp_carry == null:
+		print("  lamp road: controller missing")
+		return 1
+	GameState.move_vector = Vector2(0, -1)
+	for _f in range(120):
+		await get_tree().physics_frame
+	var drained := lamp_carry.oil < 0.99
+	GameState.move_vector = Vector2.ZERO
+	player.global_position = spawn_point
+	player.velocity = Vector3.ZERO
+	lamp_carry.reset()
+	for _f in range(10):
+		await get_tree().physics_frame
+	for _frame in range(5200):
+		if lamp_carry.arrived:
+			break
+		var target := lamp_carry.guide_point(player.global_position)
+		var d := Vector2(target.x - player.global_position.x, target.z - player.global_position.z)
+		GameState.move_vector = d.normalized() * 0.55 if d.length() > 0.5 else Vector2.ZERO
+		await get_tree().physics_frame
+		if player.global_position.y < kill_y:
+			_respawn(false)
+	GameState.move_vector = Vector2.ZERO
+	var finish_done := false
+	for it in items:
+		if str((it["data"] as Dictionary)["kind"]) == "lamp_finish":
+			finish_done = bool(it["done"])
+	print("  lamp road: difficulty=%d arrived=%s finish=%s sprint_drains=%s outs=%d" % [GameState.difficulty, lamp_carry.arrived, finish_done, drained, lamp_carry.outs])
+	player.global_position = spawn_point
+	player.velocity = Vector3.ZERO
+	return 0 if lamp_carry.arrived and finish_done and drained and lamp_carry.outs == 0 else 1
+
+## Bot that really walks: a wrong tile must only replay the order, running across tiles must not count,
+## and standing on the right tiles in order must solve the court.
+func _selftest_mosaic() -> int:
+	if mosaic == null:
+		print("  mosaic: controller missing")
+		return 1
+	var failures := 0
+	var wrong_tile := -1
+	for i in range(mosaic.tiles.size()):
+		if not mosaic.sequence.has(i):
+			wrong_tile = i
+	if wrong_tile < 0:
+		wrong_tile = (mosaic.sequence[0] + 1) % mosaic.tiles.size()
+	# 1) walk to the court and wait for the order to be shown
+	var guard := 0
+	while mosaic.phase != "input" and guard < 3600:
+		guard += 1
+		_bot_walk_to(mosaic.center + Vector3(0, 0, mosaic.ring_radius + 3.0), 0.7, 1.0)
+		await get_tree().physics_frame
+	_bot_stop()
+	if mosaic.phase != "input":
+		print("  mosaic: the order was never shown")
+		return 1
+	# 2) run straight across the first correct tile without stopping: must not count
+	var first: Vector3 = mosaic.tile_pos(mosaic.sequence[0])
+	var before := mosaic.index
+	var run_dir := Vector3(first.x - player.global_position.x, 0.0, first.z - player.global_position.z).normalized()
+	var beyond: Vector3 = first + run_dir * (mosaic.tile_radius + 3.0)
+	for _f in range(300):
+		if Vector2(player.global_position.x - beyond.x, player.global_position.z - beyond.z).length() < 0.8:
+			break
+		_bot_walk_to(beyond, 1.0, 0.0)
+		await get_tree().physics_frame
+	_bot_stop()
+	var ran_through := mosaic.index == before and mosaic.wrongs == 0
+	# 3) stand on a tile that is not in the order: only a replay, never a failure state
+	var wt: Vector3 = mosaic.tile_pos(wrong_tile)
+	guard = 0
+	while mosaic.wrongs == 0 and guard < 900:
+		guard += 1
+		_bot_walk_to(wt, 0.7, 0.5)
+		await get_tree().physics_frame
+	_bot_stop()
+	var wrong_ok := mosaic.wrongs == 1 and mosaic.index == 0
+	guard = 0
+	while mosaic.phase != "input" and guard < 3600:
+		guard += 1
+		await get_tree().physics_frame
+	# 4) the replay medallion shows the order again on demand
+	var replays_before := mosaic.replays
+	guard = 0
+	while mosaic.replays == replays_before and guard < 900:
+		guard += 1
+		_bot_walk_to(mosaic.center, 0.7, 0.5)
+		await get_tree().physics_frame
+	_bot_stop()
+	var medallion_ok := mosaic.replays == replays_before + 1
+	guard = 0
+	while mosaic.phase != "input" and guard < 3600:
+		guard += 1
+		await get_tree().physics_frame
+	# 5) repeat the order correctly with the real physics
+	for step_i in range(mosaic.sequence.size()):
+		var target: Vector3 = mosaic.tile_pos(mosaic.sequence[step_i])
+		guard = 0
+		while mosaic.index == step_i and not mosaic.solved and guard < 900:
+			guard += 1
+			_bot_walk_to(target, 0.7, 0.5)
+			await get_tree().physics_frame
+		_bot_stop()
+	await get_tree().physics_frame
+	var finish_done := false
+	for it in items:
+		if str((it["data"] as Dictionary)["kind"]) == "mosaic_finish":
+			finish_done = bool(it["done"])
+	print("  mosaic: difficulty=%d tiles=%d order=%d solved=%s finish=%s ran_through_ok=%s wrong_replays=%s medallion=%s wrongs=%d index=%d phase=%s" % [GameState.difficulty, mosaic.tiles.size(), mosaic.sequence.size(), mosaic.solved, finish_done, ran_through, wrong_ok, medallion_ok, mosaic.wrongs, mosaic.index, mosaic.phase])
+	if not (mosaic.solved and finish_done and ran_through and wrong_ok and medallion_ok):
+		failures += 1
+	player.global_position = spawn_point
+	player.velocity = Vector3.ZERO
+	return failures
+
+## Bot that really walks: running across a disc must not turn a mirror, the yellow/blue discs must turn it
+## in opposite directions, and turning the mirrors to the solution must put the light on the lantern.
+## Standing in a beam must get the courier caught, shade must be safe, and a careful bot (waits in the shade
+## until the way to the next awning is clear, with real physics) must reach the last station.
+func _selftest_night_watch() -> int:
+	var nw := night_watch
+	if nw == null:
+		print("  night_watch: controller missing")
+		return 1
+	var bad := 0
+	# 1) shade is safe: stand in the first awning for 15 seconds
+	nw.reset()
+	player.global_position = nw.zone_center(0) + Vector3(0, 1.2, 0)
+	player.velocity = Vector3.ZERO
+	GameState.move_vector = Vector2.ZERO
+	for _f in range(900):
+		await get_tree().physics_frame
+	var shade_ok := nw.seen_count == 0
+	# 2) the open path must catch a courier who just stands there
+	var spot := nw.zone_center(0).lerp(nw.zone_center(1), 0.5)
+	checkpoint = nw.zone_center(0) + Vector3(0, 1.2, 0)
+	var caught := false
+	for _round in range(30):
+		player.global_position = spot + Vector3(0, 1.2, 0)
+		player.velocity = Vector3.ZERO
+		for _f in range(60):
+			await get_tree().physics_frame
+		if nw.seen_count > 0:
+			caught = true
+			break
+	# 3) the careful bot
+	nw.reset()
+	player.global_position = spawn_point
+	player.velocity = Vector3.ZERO
+	checkpoint = spawn_point
+	var next_zone := 0
+	var going := false
+	var speed := base_run_speed * 0.8
+	for _frame in range(9000):
+		if nw.arrived:
+			break
+		var p := Vector2(player.global_position.x, player.global_position.z)
+		var goal := Vector2(nw.zones[next_zone].x, nw.zones[next_zone].y)
+		if p.distance_to(goal) < nw.zone_radius * 0.6:
+			if next_zone == nw.zones.size() - 1:
+				break
+			next_zone += 1
+			going = false
+			goal = nw.zones[next_zone]
+		if not going:
+			var clear := true
+			var dist := p.distance_to(goal)
+			var steps := int(dist / 1.0) + 1
+			for k in range(steps + 1):
+				var q := p.lerp(goal, float(k) / float(steps))
+				var tt: float = nw.elapsed + (dist * float(k) / float(steps)) / speed + 0.15
+				if nw.lit(q, tt, 7.0):
+					clear = false
+					break
+			going = clear
+		if going:
+			var d := goal - p
+			GameState.move_vector = d.normalized()
+		else:
+			GameState.move_vector = Vector2.ZERO
+		await get_tree().physics_frame
+	GameState.move_vector = Vector2.ZERO
+	var finish_done := false
+	for it in items:
+		if str((it["data"] as Dictionary)["kind"]) == "watch_finish":
+			finish_done = bool(it["done"])
+	print("  night_watch: difficulty=%d towers=%d arrived=%s finish=%s shade_ok=%s open_catches=%s seen_by_bot=%d" % [GameState.difficulty, nw.towers.size(), nw.arrived, finish_done, shade_ok, caught, nw.seen_count])
+	if not (shade_ok and caught and nw.arrived and finish_done):
+		bad += 1
+	return bad
+
+func _selftest_mirror_hall() -> int:
+	var hall := mirror_hall
+	if hall == null:
+		print("  mirror_hall: controller missing")
+		return 1
+	var failures := 0
+	var guard := 0
+	# 1) walk towards the first mirror until the hall wakes up
+	var m0 := hall.mirror_pos(0)
+	while hall.phase != "input" and guard < 3000:
+		guard += 1
+		_bot_walk_to(Vector3(m0.x, 0.0, m0.y + 12.0), 0.8, 1.0)
+		await get_tree().physics_frame
+	_bot_stop()
+	if hall.phase != "input":
+		print("  mirror_hall: never woke up")
+		return 1
+	# 2) run straight across the first yellow disc without stopping: nothing may turn
+	var dp := hall.disc_pos(0, true)
+	var disc3 := Vector3(dp.x, 0.0, dp.y)
+	var run_dir := Vector3(disc3.x - player.global_position.x, 0.0, disc3.z - player.global_position.z).normalized()
+	var beyond := disc3 + run_dir * (hall.disc_radius + 3.0)
+	var turns_before := hall.turns
+	for _f in range(300):
+		if Vector2(player.global_position.x - beyond.x, player.global_position.z - beyond.z).length() < 0.8:
+			break
+		_bot_walk_to(beyond, 1.0, 0.0)
+		await get_tree().physics_frame
+	_bot_stop()
+	var ran_through := hall.turns == turns_before
+	# 3) turn every mirror to its solution (shortest way: yellow = clockwise, blue = counter-clockwise)
+	var used_plus := 0
+	var used_minus := 0
+	for i in range(hall.mirrors.size()):
+		var k := hall.steps_needed(i)
+		if k == 0:
+			continue
+		var plus := k > 0
+		if plus:
+			used_plus += 1
+		else:
+			used_minus += 1
+		var target_disc := hall.disc_pos(i, plus)
+		var td := Vector3(target_disc.x, 0.0, target_disc.y)
+		guard = 0
+		while hall.steps_needed(i) != 0 and not hall.solved and guard < 1500:
+			guard += 1
+			_bot_walk_to(td, 0.8, 0.5)
+			await get_tree().physics_frame
+		_bot_stop()
+	await get_tree().physics_frame
+	var finish_done := false
+	for it in items:
+		if str((it["data"] as Dictionary)["kind"]) == "mirror_finish":
+			finish_done = bool(it["done"])
+	print("  mirror_hall: difficulty=%d mirrors=%d solved=%s finish=%s ran_through_ok=%s turns=%d yellow=%d blue=%d" % [GameState.difficulty, hall.mirrors.size(), hall.solved, finish_done, ran_through, hall.turns, used_plus, used_minus])
+	if not (hall.solved and finish_done and ran_through):
+		failures += 1
+	player.global_position = spawn_point
+	player.velocity = Vector3.ZERO
+	return failures
+
+## Selftest helper: steer the player towards a point (stick strength `power`, slows down inside `slow_radius`).
+func _bot_walk_to(target: Vector3, power: float, slow_radius: float) -> void:
+	var d := Vector2(target.x - player.global_position.x, target.z - player.global_position.z)
+	if d.length() < 0.35:
+		GameState.move_vector = Vector2.ZERO
+		return
+	var k := power if slow_radius <= 0.0 or d.length() > 2.0 else power * clampf(d.length() / 2.0 + 0.25, 0.25, 1.0)
+	GameState.move_vector = d.normalized() * k
+
+func _bot_stop() -> void:
+	GameState.move_vector = Vector2.ZERO
+
+func _target_at(t: Dictionary, ahead: float) -> Vector3:
+	var b: Vector3 = t["base"]
+	if float(t["amp"]) == 0.0:
+		return (t["node"] as Node3D).global_position
+	return Vector3(b.x + sin((archery_time + ahead) * float(t["speed"]) + float(t["phase"])) * float(t["amp"]), b.y, b.z)
+
+func _selftest_aim_at(p: Vector3, ahead: float) -> void:
+	for _i in range(4):
+		var dir := (p - player.camera.global_position).normalized()
+		player.yaw = atan2(-dir.x, -dir.z)
+		player.pitch = clampf(asin(clampf(dir.y, -1.0, 1.0)), player.min_pitch, player.max_pitch)
+		await get_tree().process_frame
+		await get_tree().physics_frame
+
+## A player standing on a sliding stone must be carried along, not left behind.
+func _selftest_carry() -> int:
+	var idx: int = moving_stones.keys()[0]
+	var start := stone_now(idx)
+	player.global_position = start + Vector3(0, 1.0, 0)
+	player.velocity = Vector3.ZERO
+	for _f in range(30):
+		await get_tree().physics_frame
+	var x0 := player.global_position.x - stone_now(idx).x
+	for _f in range(90):
+		await get_tree().physics_frame
+	var x1 := player.global_position.x - stone_now(idx).x
+	var still_on := player.is_on_floor() and absf(x1) < 1.7
+	print("  carry test: stone %d offset %.2f -> %.2f on_stone=%s" % [idx, x0, x1, still_on])
+	player.global_position = spawn_point
+	return 0 if still_on else 1
+
+## Harder variants must stay finishable: valid quiz answers, clues on real stones, nothing below the kill line.
+func _selftest_difficulty_sanity() -> int:
+	var bad := 0
+	for it in items:
+		var d: Dictionary = it["data"]
+		if str(d["kind"]) == "quiz":
+			var opts: Array = d["options"]
+			if int(d["answer"]) < 0 or int(d["answer"]) >= opts.size():
+				bad += 1
+		if d.has("on_chain") and int(d["on_chain"]) >= int((level["chain"] as Dictionary)["count"]):
+			bad += 1
+		var node: Node3D = it["node"]
+		if is_instance_valid(node) and node.global_position.y < kill_y + 2.0:
+			print("  unreachable item: ", d["id"])
+			bad += 1
+	if level.has("chain"):
+		var chd: Dictionary = level["chain"]
+		for mi in (chd.get("moving", []) as Array):
+			if int(mi) <= 0 or int(mi) >= int(chd["count"]) - 1 or not moving_stones.has(int(mi)):
+				bad += 1
+	if level.has("chase"):
+		var cd: Dictionary = level["chase"]
+		var gates: Array = cd.get("gates", [])
+		if float(cd.get("speed", 0.0)) <= 0.0 or float(cd.get("gap_width", 0.0)) < 4.5:
+			bad += 1
+		if int(cd.get("gate_count", 0)) < 1 or int(cd.get("gate_count", 0)) > gates.size():
+			bad += 1
+		if float(cd.get("finish_z", 0.0)) >= -8.0:
+			bad += 1
+	if level.has("wind_course"):
+		var wd: Dictionary = level["wind_course"]
+		var gusts: Array = wd.get("gusts", [])
+		if int(wd.get("count", 0)) < 1 or int(wd.get("count", 0)) > gusts.size():
+			bad += 1
+		if float(wd.get("speed", 0.0)) <= 0.0 or float(wd.get("radius", 0.0)) < 1.0:
+			bad += 1
+	if level.has("rolling_course"):
+		var rd: Dictionary = level["rolling_course"]
+		if float(rd.get("finish_z", 0.0)) >= float(rd.get("start_z", 0.0)) - 25.0:
+			bad += 1
+		if float(rd.get("mass", 0.0)) <= 0.0 or float(rd.get("rail_half_width", 0.0)) < 2.7:
+			bad += 1
+	if level.has("turning_bridge"):
+		var td: Dictionary = level["turning_bridge"]
+		if int(td.get("count", 0)) < 3 or int(td.get("count", 0)) > 6:
+			bad += 1
+		if float(td.get("speed", 0.0)) <= 0.0 or float(td.get("angle", 0.0)) <= 0.0 or float(td.get("width", 0.0)) < 1.8:
+			bad += 1
+	if level.has("lamp_road"):
+		var ld: Dictionary = level["lamp_road"]
+		var zs: Array = ld.get("stations", [])
+		if zs.size() < 2 or float(ld.get("drain", 0.0)) <= 0.0 or float(ld.get("jump_cost", 0.0)) <= 0.0:
+			bad += 1
+		if float(ld.get("walk_limit", 0.0)) < base_run_speed * 0.55 + 0.1 or float(ld.get("need", 1.0)) > 0.5:
+			bad += 1
+		var prev := 8.0
+		for z in zs:
+			if prev - float(z) > 40.0 or float(z) >= prev:
+				bad += 1
+			prev = float(z)
+		if prev - float(ld.get("finish_z", 0.0)) > 40.0:
+			bad += 1
+	if level.has("mosaic"):
+		var md: Dictionary = level["mosaic"]
+		var mc := int(md.get("count", 0))
+		var ms := int(md.get("seq_len", 0))
+		if mc < 3 or mc > 6 or ms < 2 or ms > mc:
+			bad += 1
+		if float(md.get("show_time", 0.0)) < 0.5 or float(md.get("tile_radius", 0.0)) < 1.2:
+			bad += 1
+		# running straight across a tile (full speed, through the middle) must take less than the dwell time
+		if float(md.get("dwell", 0.0)) < 2.0 * float(md.get("tile_radius", 0.0)) / base_run_speed + 0.1:
+			bad += 1
+		# neighbouring tiles must not touch, and the order must only name existing tiles
+		var mr := float(md.get("ring_radius", 0.0))
+		if mr * 2.0 * sin(PI / float(maxi(mc, 1))) < float(md.get("tile_radius", 0.0)) * 2.0 + 2.0:
+			bad += 1
+		var named := 0
+		for o in (md.get("order", []) as Array):
+			if int(o) < mc:
+				named += 1
+		if named < ms:
+			bad += 1
+	if level.has("light"):
+		var ld: Dictionary = level["light"]
+		var lay: Dictionary = ld["layout"]
+		var half := float(ld["mirror_half"])
+		var solution := []
+		var start := []
+		var lms := lay["mirrors"] as Array
+		for mm in lms:
+			solution.append({"pos": mm["pos"], "phi": deg_to_rad(float(mm["solution"]))})
+			start.append({"pos": mm["pos"], "phi": deg_to_rad(float(mm["start"]))})
+		var a0 := deg_to_rad(float(lay.get("angle", 0.0)))
+		var sol_trace := MirrorHallController.trace(lay["source"], a0, solution, lay["target"], float(ld["target_radius"]), half)
+		var start_trace := MirrorHallController.trace(lay["source"], a0, start, lay["target"], float(ld["target_radius"]), half)
+		if not bool(sol_trace["hit"]) or bool(start_trace["hit"]):
+			bad += 1   # the solution must reach the lantern and the starting position must not
+		# turning a disc needs a longer stand than running across it (full speed, through the middle)
+		if float(ld["delay"]) < 2.0 * float(ld["disc_radius"]) / base_run_speed + 0.1:
+			bad += 1
+		# discs must stay off the solved beam and away from each other, the source and the lantern
+		var pts: Array = sol_trace["points"]
+		var disc_list := []
+		for mm in lms:
+			var mp: Vector2 = mm["pos"]
+			disc_list.append(mp + Vector2(2.6, 2.6))
+			disc_list.append(mp + Vector2(-2.6, 2.6))
+		for di in range(disc_list.size()):
+			var dv: Vector2 = disc_list[di]
+			for pi in range(pts.size() - 1):
+				var sa: Vector2 = pts[pi]
+				var sb: Vector2 = pts[pi + 1]
+				var cp := Geometry2D.get_closest_point_to_segment(dv, sa, sb)
+				if cp.distance_to(dv) < float(ld["disc_radius"]) + 0.8:
+					bad += 1
+			if dv.distance_to(lay["target"]) < float(ld["disc_radius"]) + 1.5 or dv.distance_to(lay["source"]) < float(ld["disc_radius"]) + 1.5:
+				bad += 1
+			for dj in range(di + 1, disc_list.size()):
+				if dv.distance_to(disc_list[dj]) < float(ld["disc_radius"]) * 2.0 + 0.5:
+					bad += 1
+	if level.has("night_watch"):
+		var nd: Dictionary = level["night_watch"]
+		var nz: Array = nd["zones"]
+		if nz.size() < 3 or (nd["towers"] as Array).is_empty():
+			bad += 1
+		for zi in range(1, nz.size()):
+			if (nz[zi - 1] as Vector2).distance_to(nz[zi]) > 32.0:
+				bad += 1   # awnings must stay close enough to run between during one dark gap
+		# crossing a stretch at full speed must be faster than one lap of a beam, or waiting never helps
+		if float(nd["omega"]) * 0.0174533 * (26.0 / base_run_speed) > TAU * 0.9:
+			bad += 1
+		if float(nd["grace"]) < 0.2:
+			bad += 1
+	var orders := []
+	for it in items:
+		if str((it["data"] as Dictionary)["kind"]) == "brazier":
+			orders.append(int((it["data"] as Dictionary)["order"]))
+	orders.sort()
+	if not orders.is_empty() and orders != [0, 1, 2, 3]:
+		bad += 1
+	return bad
+
+## Bot that crosses the stone pass with the real physics (CI regression test).
+func _run_jumptest() -> void:
+	var jump_dist := 3.8
+	var failures := 0
+	for variant in range(3):
+		GameState.difficulty = variant
+		load_level(1, false)
+		hud.close_all_modals()
+		await get_tree().physics_frame
+		jump_dist = [3.6, 3.8, 3.4][variant]
+		var targets: Array[Vector3] = []
+		var lip_z := float((level["chasm"] as Dictionary)["z0"]) + 3.0
+		targets.append(Vector3(terrain.path_x(lip_z), 0, lip_z))
+		var count := int((level["chain"] as Dictionary)["count"])
+		for i in range(count):
+			targets.append(chain_position(i))
+		var far_z := float((level["chasm"] as Dictionary)["z1"]) - 6.0
+		targets.append(Vector3(terrain.path_x(far_z), 0, far_z))
+		var reached := 0
+		for t in range(targets.size()):
+			var target := targets[t]
+			var frames := 0
+			var ok := false
+			while frames < 420:
+				frames += 1
+				await get_tree().physics_frame
+				var d := Vector2(target.x - player.global_position.x, target.z - player.global_position.z)
+				if d.length() < 1.5 and player.is_on_floor():
+					ok = true
+					break
+				GameState.move_vector = d.normalized()
+				if player.is_on_floor() and t > 0 and d.length() > 2.2 and (_ground_ends_ahead(d.normalized()) or d.length() < jump_dist):
+					player.request_jump()
+				elif player.is_on_floor() and t == 0 and d.length() < 0.9:
+					ok = true
+				if player.global_position.y < kill_y:
+					break
+			if not ok:
+				print("  bot stuck heading to waypoint %d at %s (target %s) frames=%d floor=%s" % [t, player.global_position, target, frames, player.is_on_floor()])
+				break
+			reached += 1
+		GameState.move_vector = Vector2.ZERO
+		print("jumptest difficulty %d (jump at %.1f m): reached %d / %d waypoints" % [variant, jump_dist, reached, targets.size()])
+		if reached < targets.size():
+			failures += 1
+	print("JUMPTEST ", "OK" if failures == 0 else "FAILED (%d)" % failures)
+	get_tree().quit(0 if failures == 0 else 1)
+
+
+
+
+## True when there is no solid ground 0.55 m ahead (a human jumps right at the lip).
+func _ground_ends_ahead(dir: Vector2) -> bool:
+	var from := player.global_position + Vector3(dir.x, 0.5, dir.y) * 0.55
+	var query := PhysicsRayQueryParameters3D.create(from, from + Vector3(0, -2.5, 0))
+	query.exclude = [player.get_rid()]
+	return get_world_3d().direct_space_state.intersect_ray(query).is_empty()
+
+# ---------- river bridge (push a tree trunk to the bank) ----------
+
+func _gap_info() -> Dictionary:
+	var ch: Dictionary = level["chasm"]
+	var near_z := float(ch["z0"])
+	var far_z := float(ch["z1"]) - float(ch.get("edge", 2.0))
+	return {"near": near_z, "far": far_z, "mid": (near_z + far_z) * 0.5}
+
+func _build_bridge() -> void:
+	var br: Dictionary = level["bridge"]
+	var gap := _gap_info()
+	bridge_need = int(DifficultyRules.BRIDGE_TRUNKS[GameState.difficulty])
+	var spawn_list: Array = br["trunks"]
+	var count := mini(bridge_need + 2, spawn_list.size())
+	var pm := PhysicsMaterial.new()
+	pm.friction = 1.0
+	pm.rough = true
+	for i in range(count):
+		var off: Vector2 = spawn_list[i]
+		var z := off.y
+		var x := terrain.path_x(z) + off.x
+		var rb := RigidBody3D.new()
+		rb.name = "Trunk%d" % i
+		rb.mass = 30.0
+		rb.linear_damp = 1.6
+		rb.angular_damp = 2.2
+		rb.continuous_cd = true
+		rb.physics_material_override = pm
+		rb.add_to_group("pushable")
+		var cs := CollisionShape3D.new()
+		var cyl := CylinderShape3D.new()
+		cyl.radius = 0.5
+		cyl.height = 2.6
+		cs.shape = cyl
+		cs.rotation.z = PI * 0.5
+		rb.add_child(cs)
+		rb.add_child(PropFactory.make_trunk())
+		level_root.add_child(rb)
+		rb.global_position = Vector3(x, terrain.height(x, z) + 0.9, z)
+		rb.set_meta("home", rb.global_position)
+		trunks.append(rb)
+	# detection zone on the near bank
+	var px := terrain.path_x(float(gap["near"]) + 3.0)
+	var by := terrain.height(px, float(gap["near"]) + 3.0)
+	bridge_slot = Area3D.new()
+	bridge_slot.name = "BridgeSlot"
+	var slot_shape := CollisionShape3D.new()
+	var box := BoxShape3D.new()
+	box.size = Vector3(18.0, 4.0, 4.5)
+	slot_shape.shape = box
+	bridge_slot.add_child(slot_shape)
+	bridge_slot.position = Vector3(px, by + 1.0, float(gap["near"]) + 2.6)
+	level_root.add_child(bridge_slot)
+	bridge_slot.body_entered.connect(_on_slot_body)
+	# water at the bottom of the gap (falling in = respawn)
+	var water := MeshInstance3D.new()
+	var plane := PlaneMesh.new()
+	plane.size = Vector2(170.0, absf(float(gap["near"]) - float(gap["far"])) + 6.0)
+	water.mesh = plane
+	var wmat := ShaderMaterial.new()
+	wmat.shader = load("res://shaders/water.gdshader")
+	water.material_override = wmat
+	water.position = Vector3(0.0, float(br.get("water_y", -2.3)), float(gap["mid"]))
+	water.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	level_root.add_child(water)
+
+func _on_slot_body(body: Node3D) -> void:
+	if bridge_built or not (body is RigidBody3D) or not trunks.has(body as RigidBody3D):
+		return
+	var rb := body as RigidBody3D
+	trunks.erase(rb)
+	var burst := PropFactory.make_burst(Color("#c9a26b"))
+	burst.position = rb.global_position
+	level_root.add_child(burst)
+	get_tree().create_timer(2.0).timeout.connect(burst.queue_free)
+	rb.queue_free()
+	bridge_delivered += 1
+	if bridge_delivered >= bridge_need:
+		_build_deck()
+		_msg("bridge_built", 5.0)
+	else:
+		_msg("bridge_more", 4.0)
+
+func _build_deck() -> void:
+	bridge_built = true
+	var gap := _gap_info()
+	var near_z := float(gap["near"])
+	var far_z := float(gap["far"])
+	var mid := float(gap["mid"])
+	var length := absf(near_z - far_z) + 4.0
+	var px := terrain.path_x(mid)
+	var top := maxf(terrain.height(terrain.path_x(near_z + 1.0), near_z + 1.0), terrain.height(terrain.path_x(far_z - 1.0), far_z - 1.0)) + 0.03
+	var width := 5.0
+	var deck := StaticBody3D.new()
+	deck.name = "BridgeDeck"
+	var cs := CollisionShape3D.new()
+	var bx := BoxShape3D.new()
+	bx.size = Vector3(width, 0.5, length)
+	cs.shape = bx
+	cs.position = Vector3(px, top - 0.25, mid)
+	deck.add_child(cs)
+	var bark := PropFactory.mat(Color("#6a4a2c"), 1.0)
+	var planks := PropFactory.mat(Color("#a9815a"), 0.95)
+	deck.add_child(PropFactory.part(PropFactory.box(Vector3(width, 0.18, length)), planks, Vector3(px, top - 0.09, mid)))
+	for s in [-1.0, 1.0]:
+		var rail := PropFactory.part(PropFactory.cylinder(0.3, 0.3, length, 10), bark, Vector3(px + s * (width * 0.5), top - 0.05, mid))
+		rail.rotation.x = PI * 0.5
+		deck.add_child(rail)
+	for k in range(bridge_need + 1):
+		var z := near_z - 1.5 - float(k) * (length - 3.0) / float(maxi(bridge_need, 1))
+		deck.add_child(PropFactory.part(PropFactory.box(Vector3(width + 0.6, 0.12, 0.35)), bark, Vector3(px, top + 0.02, z)))
+	level_root.add_child(deck)
+	for rb in trunks:
+		rb.queue_free()   # spares are no longer needed
+	trunks.clear()
+
+func _update_bridge() -> void:
+	if not level.has("bridge"):
+		return
+	var gap := _gap_info()
+	# a trunk that fell into the river returns to where it started (the level stays finishable)
+	for rb in trunks:
+		if is_instance_valid(rb) and rb.global_position.y < kill_y + 1.0:
+			rb.linear_velocity = Vector3.ZERO
+			rb.angular_velocity = Vector3.ZERO
+			rb.global_position = rb.get_meta("home")
+			_msg("trunk_lost", 3.0)
+		elif is_instance_valid(rb) and not _hint_trunk_shown and rb.global_position.distance_to(player.global_position) < 3.2:
+			_hint_trunk_shown = true
+	# respawn at solid ground on either bank, never inside the gap
+	if player.is_on_floor():
+		var z := player.global_position.z
+		if z > float(gap["near"]) + 2.0 or z < float(gap["far"]) - 2.0:
+			checkpoint = player.global_position + Vector3(0, 0.4, 0)
+
+# ---------- balance gate (push millstones onto the left pan) ----------
+
+func _build_scale_gate() -> void:
+	var sc: Dictionary = level["scale"]
+	var diff := GameState.difficulty
+	scale_target = int((sc["target"] as Array)[diff])
+	var weights: Array = (sc["stones"] as Array)[diff]
+	var z := float(sc["z"])
+	var cx := terrain.path_x(z)
+	var gy := terrain.height(cx, z)
+	var pan_off := 6.0
+	scale_pan_l = Vector3(cx - pan_off, terrain.height(cx - pan_off, z), z)
+	var pan_r := Vector3(cx + pan_off, terrain.height(cx + pan_off, z), z)
+	var font: Font = load("res://fonts/Vazirmatn-Bold.ttf")
+	var pan_mat := PropFactory.mat(Color("#c9b78e"), 0.9)
+	var rim_mat := PropFactory.mat(Color("#8a7a58"), 0.9)
+	for p in [scale_pan_l, pan_r]:
+		level_root.add_child(PropFactory.part(PropFactory.cylinder(3.3, 3.3, 0.3, 36), rim_mat, p + Vector3(0, 0.02, 0)))
+		level_root.add_child(PropFactory.part(PropFactory.cylinder(3.0, 3.0, 0.3, 36), pan_mat, p + Vector3(0, 0.06, 0)))
+	# the fixed "offering" on the right pan (its number is the weight to match)
+	var offer := PropFactory.part(PropFactory.cylinder(1.5, 1.5, 1.1, 20), PropFactory.mat(Color("#6d6659"), 0.95), pan_r + Vector3(0, 0.7, 0))
+	level_root.add_child(offer)
+	var offer_body := StaticBody3D.new()
+	var ocs := CollisionShape3D.new()
+	var ocyl := CylinderShape3D.new()
+	ocyl.radius = 1.5
+	ocyl.height = 1.1
+	ocs.shape = ocyl
+	offer_body.add_child(ocs)
+	offer_body.position = pan_r + Vector3(0, 0.7, 0)
+	level_root.add_child(offer_body)
+	level_root.add_child(_weight_label(hud.fa(scale_target), pan_r + Vector3(0, 2.5, 0), font, 0.02))
+	# balance beam on a post; tilts with (left - right)
+	var post := PropFactory.part(PropFactory.cylinder(0.25, 0.35, 7.0, 10), PropFactory.mat(Color("#5b4a38"), 0.9), Vector3(cx, gy + 3.5, z))
+	level_root.add_child(post)
+	scale_beam = Node3D.new()
+	scale_beam.position = Vector3(cx, gy + 7.0, z)
+	scale_beam.add_child(PropFactory.part(PropFactory.box(Vector3(pan_off * 2.0 + 1.6, 0.3, 0.3)), PropFactory.mat(Color("#c79a3d"), 0.4, 0.4), Vector3.ZERO))
+	for sx in [-pan_off, pan_off]:
+		scale_beam.add_child(PropFactory.part(PropFactory.sphere(0.45, 12), PropFactory.mat(Color("#c79a3d"), 0.4, 0.4), Vector3(sx, -0.1, 0)))
+	level_root.add_child(scale_beam)
+	scale_lamp = PropFactory.part(PropFactory.sphere(0.5, 14), PropFactory.mat(Color("#d9a441"), 0.3, 0.0, 2.0), Vector3(cx, gy + 7.9, z))
+	level_root.add_child(scale_lamp)
+	# millstones
+	var pm := PhysicsMaterial.new()
+	pm.friction = 1.0
+	pm.rough = true
+	for i in range(weights.size()):
+		var w := int(weights[i])
+		var r := 0.5 + 0.1 * float(w)
+		var sx2 := scale_pan_l.x + (float(i) - float(weights.size() - 1) * 0.5) * 2.8
+		var sz2 := z + 11.0 + float(i % 2) * 2.6
+		var rb := RigidBody3D.new()
+		rb.name = "Millstone%d" % i
+		rb.mass = 8.0 * float(w)
+		rb.linear_damp = 8.0
+		rb.angular_damp = 20.0
+		rb.axis_lock_angular_x = true
+		rb.axis_lock_angular_z = true
+		rb.continuous_cd = true
+		rb.physics_material_override = pm
+		rb.add_to_group("pushable")
+		rb.set_meta("w", w)
+		rb.set_meta("r", r)
+		rb.set_meta("push_factor", 1.0 / sqrt(float(w)))
+		var cs := CollisionShape3D.new()
+		var cyl := CylinderShape3D.new()
+		cyl.radius = r
+		cyl.height = 1.5
+		cs.shape = cyl
+		rb.add_child(cs)
+		var shade := Color("#a89d88").darkened(0.05 * float(w))
+		rb.add_child(PropFactory.part(PropFactory.cylinder(r, r, 1.5, 20), PropFactory.mat(shade, 0.95)))
+		rb.add_child(PropFactory.part(PropFactory.cylinder(r * 0.22, r * 0.22, 1.54, 10), PropFactory.mat(Color("#5d5648"), 0.9)))
+		level_root.add_child(rb)
+		rb.global_position = Vector3(sx2, terrain.height(sx2, sz2) + 0.85, sz2)
+		rb.set_meta("home", rb.global_position)
+		rb.add_child(_weight_label(hud.fa(w), Vector3(0, 1.3, 0), font, 0.012, true))
+		scale_stones.append(rb)
+	# the gate: pillars, lintel, door, and walls so it cannot be walked around
+	var gz := z - 14.0
+	var stone := PropFactory.mat(Color("#b4a58a"), 0.95)
+	var gate_body := StaticBody3D.new()
+	gate_body.name = "GateWalls"
+	level_root.add_child(gate_body)
+	for side in [-1.0, 1.0]:
+		level_root.add_child(PropFactory.part(PropFactory.box(Vector3(1.4, 8.0, 1.6)), stone, Vector3(cx + side * 3.6, gy + 4.0, gz)))
+		level_root.add_child(PropFactory.part(PropFactory.box(Vector3(34.0, 7.0, 1.6)), stone, Vector3(cx + side * 21.7, gy + 3.5, gz)))
+		var wc := CollisionShape3D.new()
+		var wb := BoxShape3D.new()
+		wb.size = Vector3(34.0, 14.0, 1.6)
+		wc.shape = wb
+		wc.position = Vector3(cx + side * 21.7, gy + 6.0, gz)
+		gate_body.add_child(wc)
+		var pc := CollisionShape3D.new()
+		var pb := BoxShape3D.new()
+		pb.size = Vector3(1.4, 8.0, 1.6)
+		pc.shape = pb
+		pc.position = Vector3(cx + side * 3.6, gy + 4.0, gz)
+		gate_body.add_child(pc)
+	level_root.add_child(PropFactory.part(PropFactory.box(Vector3(8.6, 1.2, 1.6)), stone, Vector3(cx, gy + 8.4, gz)))
+	scale_door = StaticBody3D.new()
+	scale_door.name = "GateDoor"
+	scale_door.position = Vector3(cx, gy + 3.9, gz)
+	scale_door.add_child(PropFactory.part(PropFactory.box(Vector3(5.8, 7.8, 0.8)), PropFactory.mat(Color("#6a4a2c"), 0.8), Vector3.ZERO))
+	scale_door.add_child(PropFactory.part(PropFactory.box(Vector3(5.8, 0.3, 0.9)), PropFactory.mat(Color("#c79a3d"), 0.4, 0.5), Vector3(0, 2.0, 0)))
+	scale_door.add_child(PropFactory.part(PropFactory.box(Vector3(5.8, 0.3, 0.9)), PropFactory.mat(Color("#c79a3d"), 0.4, 0.5), Vector3(0, -2.0, 0)))
+	scale_door_col = CollisionShape3D.new()
+	var dbox := BoxShape3D.new()
+	dbox.size = Vector3(5.8, 7.8, 0.8)
+	scale_door_col.shape = dbox
+	scale_door.add_child(scale_door_col)
+	level_root.add_child(scale_door)
+
+func _weight_label(text: String, pos: Vector3, font: Font, pixel: float, billboard: bool = true) -> Label3D:
+	var l := Label3D.new()
+	l.text = text
+	l.font = font
+	l.font_size = 120
+	l.pixel_size = pixel * 1.6
+	l.outline_size = 14
+	l.modulate = Color("#ffe39a")
+	l.outline_modulate = Color("#3a2a12")
+	l.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	l.no_depth_test = false
+	l.position = pos
+	return l
+
+func _update_scale(delta: float) -> void:
+	if not level.has("scale") or scale_beam == null:
+		return
+	var total := 0
+	var still := true
+	for rb in scale_stones:
+		if not is_instance_valid(rb):
+			continue
+		var p := rb.global_position
+		if p.y < -20.0:
+			rb.linear_velocity = Vector3.ZERO
+			rb.global_position = rb.get_meta("home")
+			continue
+		if Vector2(p.x - scale_pan_l.x, p.z - scale_pan_l.z).length() < 3.0 and absf(p.y - scale_pan_l.y) < 2.2:
+			total += int(rb.get_meta("w"))
+			if rb.linear_velocity.length() > 0.6:
+				still = false
+	scale_sum = total
+	scale_beam.rotation.z = lerpf(scale_beam.rotation.z, clampf(float(total - scale_target) * 0.07, -0.5, 0.5), 1.0 - exp(-4.0 * delta))
+	var lamp_mat := scale_lamp.material_override as StandardMaterial3D
+	var lamp_color := Color("#3fd16a") if total == scale_target else (Color("#e06a3a") if total > scale_target else Color("#d9a441"))
+	lamp_mat.albedo_color = lamp_color
+	lamp_mat.emission = lamp_color
+	if scale_solved:
+		return
+	if total == scale_target and still:
+		scale_hold += delta
+	else:
+		scale_hold = 0.0
+	if scale_hold >= 1.2:
+		_solve_scale()
+
+func _solve_scale() -> void:
+	scale_solved = true
+	for it in items:
+		if str((it["data"] as Dictionary)["kind"]) == "scale":
+			_mark_done(it)
+	_msg("scale_solved", 4.5)
+	var tw := create_tween()
+	tw.tween_property(scale_door, "position:y", scale_door.position.y + 8.2, 1.8).set_trans(Tween.TRANS_SINE)
+	tw.tween_callback(func() -> void: scale_door_col.set_deferred("disabled", true))
+	_check_finish()
+
+func _subset_for(weights: Array, target: int) -> Array:
+	var n := weights.size()
+	var best: Array = []
+	for mask in range(1, 1 << n):
+		var sum := 0
+		var idxs: Array = []
+		for b in range(n):
+			if mask & (1 << b):
+				sum += int(weights[b])
+				idxs.append(b)
+		if sum == target and (best.is_empty() or idxs.size() < best.size()):
+			best = idxs   # fewest stones = fewest to fit on the pan
+	return best
+
+## Bot: the gate stays shut until the weights match; pushing the right millstones opens it; then walk through.
+func _selftest_scale() -> int:
+	var cx := terrain.path_x(float((level["scale"] as Dictionary)["z"]))
+	var gate_z := float((level["scale"] as Dictionary)["z"]) - 14.0
+	# 1) closed gate really blocks
+	player.global_position = Vector3(cx, terrain.height(cx, gate_z + 4.0) + 0.6, gate_z + 4.0)
+	player.velocity = Vector3.ZERO
+	for _f in range(150):
+		await get_tree().physics_frame
+		GameState.move_vector = Vector2(0, -1)
+	GameState.move_vector = Vector2.ZERO
+	if player.global_position.z < gate_z:
+		print("  scale: player walked through the CLOSED gate")
+		return 1
+	# 2) push the stones whose weights sum to the target onto the left pan
+	var ws: Array = []
+	for rb in scale_stones:
+		ws.append(int(rb.get_meta("w")))
+	var pick := _subset_for(ws, scale_target)
+	if pick.is_empty():
+		print("  scale: no stone combination reaches %d" % scale_target)
+		return 1
+	var pan_center := Vector2(scale_pan_l.x, scale_pan_l.z)
+	var slot_n := 0
+	for idx in pick:
+		# each stone gets its own spot on the pan, like a player would (stones cannot overlap)
+		var ang := float(slot_n) * TAU / float(maxi(pick.size(), 1)) + 0.4
+		var pan := pan_center + Vector2(cos(ang), sin(ang)) * 1.7
+		slot_n += 1
+		var rb: RigidBody3D = scale_stones[idx]
+		var r := float(rb.get_meta("r"))
+		for f in range(800):
+			var sp := Vector2(rb.global_position.x, rb.global_position.z)
+			var to_pan := pan - sp
+			if to_pan.length() < 0.9:
+				break
+			var dirv := to_pan.normalized()
+			var behind := sp - dirv * (r + 0.7)
+			# Keep the bot on the pushing side of this physical stone. On uneven
+			# terrain a long push can otherwise leave it rubbing the rim instead.
+			if f == 0 or Vector2(player.global_position.x - behind.x, player.global_position.z - behind.y).length() > 2.0:
+				player.global_position = Vector3(behind.x, terrain.height(behind.x, behind.y) + 0.6, behind.y)
+				player.velocity = Vector3.ZERO
+			var pp := Vector2(player.global_position.x, player.global_position.z)
+			var mv := dirv + (behind - pp) * 1.2
+			GameState.move_vector = mv.limit_length(1.0)
+			await get_tree().physics_frame
+			if f == 799:
+				print("    push timeout: stone w=%d at %s slot %s player %s" % [int(rb.get_meta("w")), rb.global_position, pan, player.global_position])
+		GameState.move_vector = Vector2.ZERO
+	# 3) wait for the balance + door animation, then walk through
+	player.global_position = Vector3(cx, terrain.height(cx, gate_z + 8.0) + 0.6, gate_z + 8.0)   # step away from the stones
+	player.velocity = Vector3.ZERO
+	for _f in range(480):
+		await get_tree().physics_frame
+	if not scale_solved:
+		print("  scale: not solved (sum=%d target=%d hold=%.2f)" % [scale_sum, scale_target, scale_hold])
+		for rb in scale_stones:
+			print("    stone w=%d pos=%s vel=%.2f" % [int(rb.get_meta("w")), rb.global_position, rb.linear_velocity.length()])
+		return 1
+	player.global_position = Vector3(cx, terrain.height(cx, gate_z + 4.0) + 0.6, gate_z + 4.0)
+	player.velocity = Vector3.ZERO
+	var through := false
+	for _f in range(400):
+		await get_tree().physics_frame
+		GameState.move_vector = Vector2(0, -1)
+		if player.global_position.z < gate_z - 5.0 and player.is_on_floor():
+			through = true
+			break
+	GameState.move_vector = Vector2.ZERO
+	print("  scale: target=%d stones=%s solved=%s through_gate=%s" % [scale_target, str(ws), scale_solved, through])
+	player.global_position = spawn_point
+	return 0 if through else 1
