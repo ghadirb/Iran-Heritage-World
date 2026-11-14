@@ -23,6 +23,7 @@ Mechanics already in the game (reuse before inventing):
 | clay_waterway | **physical rolling**: push a clay ball down a guiding channel to its marker; a lost ball resets to its fixed home | `rolling_course_controller.gd`, `_update_rolling_course`, `_selftest_rolling_course` |
 | turning_bridge | **balance/jump**: cross narrow rotating beams over a chasm; falling only returns to a static rest pad | `turning_bridge_controller.gd`, `_update_turning_bridge`, `_selftest_turning_bridge` |
 | caravan_lamp | **calm walking**: carry a lamp; running (above `walk_limit`) and jumping spill oil, static oil jars refill and are the checkpoints; lamp out = back to last jar; tower needs `need` oil | `lamp_carry_controller.gd`, `_update_lamp_road`, `_selftest_lamp_road` |
+| mosaic_court | **memory + standing**: tiles light up in an order; repeat it by standing on each tile for `dwell` seconds (crossing at full speed must take less than `dwell`, enforced in the sanity check); a wrong tile only replays the order, the centre medallion replays it on demand and keeps progress; no time limit, no fall | `mosaic_court_controller.gd`, `_update_mosaic`, `_selftest_mosaic` |
 
 ## Difficulty is mandatory, not optional
 Three levels: 0 easy (original data), 1 medium (default), 2 challenge. They are NOT hand-written
@@ -88,6 +89,7 @@ hides the target. Chapter 8 uses a nonviolent mist chase through moving safe gap
 wind gusts, with collision returning the player only to their last static checkpoint. Chapter 10 has a physical clay-ball
 rolling course; its ball is a RigidBody3D and its recovery point is fixed.
 Chapter 11 uses rotating `AnimatableBody3D` beams with fixed rest-pad checkpoints.
+Chapter 12 carries a lamp with calm steps; chapter 13 (mosaic court) is a memory-and-standing court (see the table).
 Developer filters for faster tests: `godot --headless --path app -- --selftest --only=<level index> --diff=<0..2>`.
 Developer helper to look at a chapter without a phone (needs `xvfb-run` and mesa):
 `xvfb-run -a godot --rendering-driver opengl3 --path app -- --shot=/tmp/a.png --level=6 --z=8 --shoot=40`

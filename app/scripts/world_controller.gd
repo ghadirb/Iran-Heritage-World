@@ -61,6 +61,7 @@ var wind_course: WindCourseController
 var rolling_course: RollingCourseController
 var turning_bridge: TurningBridgeController
 var lamp_carry: LampCarryController
+var mosaic: MosaicCourtController
 
 func _ready() -> void:
 	selftest = OS.get_cmdline_user_args().has("--selftest")
@@ -179,6 +180,7 @@ func load_level(index: int, announce: bool = true) -> void:
 	rolling_course = null
 	turning_bridge = null
 	lamp_carry = null
+	mosaic = null
 	shoot_cooldown = 0.0
 	archery_time = 0.0
 	arrows_fired = 0
@@ -220,6 +222,8 @@ func load_level(index: int, announce: bool = true) -> void:
 		_build_turning_bridge()
 	if level.has("lamp_road"):
 		_build_lamp_road()
+	if level.has("mosaic"):
+		_build_mosaic()
 	_setup_bow()
 	_build_ambient_particles()
 	var sp: Vector2 = level["spawn"]
@@ -239,6 +243,8 @@ func load_level(index: int, announce: bool = true) -> void:
 		turning_bridge.reset()
 	if lamp_carry:
 		lamp_carry.reset()
+	if mosaic:
+		mosaic.reset()
 	player.input_enabled = true
 	hud.close_all_modals()
 	hud.set_level_info(str(level["title"]), str(level["subtitle"]))
@@ -679,6 +685,33 @@ func _update_lamp_road(delta: float) -> void:
 			_msg("lamp_safe", 3.5)
 			_check_finish()
 
+# ---------- mosaic court (chapter 13): repeat the lit order by standing on tiles ----------
+
+func _build_mosaic() -> void:
+	mosaic = MosaicCourtController.new()
+	mosaic.build(level_root, terrain, level)
+
+func _update_mosaic(delta: float) -> void:
+	if mosaic == null:
+		return
+	var result := mosaic.step(delta, player.global_position, player.is_on_floor())
+	match result:
+		"watch":
+			_msg("mosaic_watch", 4.0)
+		"replay":
+			_msg("mosaic_replay", 2.5)
+		"right":
+			_msg("mosaic_right", 1.5)
+		"wrong":
+			mistakes += 1
+			_msg("mosaic_wrong", 3.0)
+		"solved":
+			for it in items:
+				if str((it["data"] as Dictionary)["kind"]) == "mosaic_finish" and not bool(it["done"]):
+					_mark_done(it)
+			_msg("mosaic_solved", 3.5)
+			_check_finish()
+
 func _aim_ray() -> Dictionary:
 	var cam := player.camera
 	return {"origin": cam.global_position, "dir": -cam.global_transform.basis.z}
@@ -823,6 +856,7 @@ func _physics_process(delta: float) -> void:
 	_update_rolling_course()
 	_update_turning_bridge(delta)
 	_update_lamp_road(delta)
+	_update_mosaic(delta)
 	if moving_stones.is_empty():
 		return
 	chain_time += delta
@@ -915,7 +949,7 @@ func _build_interactables() -> void:
 			"roll_finish":
 				node = PropFactory.make_clue_marker("clue")
 				pos += Vector3(0, 0.9, 0)
-			"turn_finish", "lamp_finish":
+			"turn_finish", "lamp_finish", "mosaic_finish":
 				node = PropFactory.make_clue_marker("clue")
 				pos += Vector3(0, 0.9, 0)
 			"npc":
@@ -1339,6 +1373,8 @@ func _selftest_level(i: int) -> int:
 		failures += await _selftest_turning_bridge()
 	if level.has("lamp_road"):
 		failures += await _selftest_lamp_road()
+	if level.has("mosaic"):
+		failures += await _selftest_mosaic()
 	for it in items:
 		if not bool((it["data"] as Dictionary).get("finale", false)):
 			it["done"] = true
@@ -1680,6 +1716,100 @@ func _selftest_lamp_road() -> int:
 	player.velocity = Vector3.ZERO
 	return 0 if lamp_carry.arrived and finish_done and drained and lamp_carry.outs == 0 else 1
 
+## Bot that really walks: a wrong tile must only replay the order, running across tiles must not count,
+## and standing on the right tiles in order must solve the court.
+func _selftest_mosaic() -> int:
+	if mosaic == null:
+		print("  mosaic: controller missing")
+		return 1
+	var failures := 0
+	var wrong_tile := -1
+	for i in range(mosaic.tiles.size()):
+		if not mosaic.sequence.has(i):
+			wrong_tile = i
+	if wrong_tile < 0:
+		wrong_tile = (mosaic.sequence[0] + 1) % mosaic.tiles.size()
+	# 1) walk to the court and wait for the order to be shown
+	var guard := 0
+	while mosaic.phase != "input" and guard < 3600:
+		guard += 1
+		_bot_walk_to(mosaic.center + Vector3(0, 0, mosaic.ring_radius + 3.0), 0.7, 1.0)
+		await get_tree().physics_frame
+	_bot_stop()
+	if mosaic.phase != "input":
+		print("  mosaic: the order was never shown")
+		return 1
+	# 2) run straight across the first correct tile without stopping: must not count
+	var first: Vector3 = mosaic.tile_pos(mosaic.sequence[0])
+	var before := mosaic.index
+	var run_dir := Vector3(first.x - player.global_position.x, 0.0, first.z - player.global_position.z).normalized()
+	var beyond: Vector3 = first + run_dir * (mosaic.tile_radius + 3.0)
+	for _f in range(300):
+		if Vector2(player.global_position.x - beyond.x, player.global_position.z - beyond.z).length() < 0.8:
+			break
+		_bot_walk_to(beyond, 1.0, 0.0)
+		await get_tree().physics_frame
+	_bot_stop()
+	var ran_through := mosaic.index == before and mosaic.wrongs == 0
+	# 3) stand on a tile that is not in the order: only a replay, never a failure state
+	var wt: Vector3 = mosaic.tile_pos(wrong_tile)
+	guard = 0
+	while mosaic.wrongs == 0 and guard < 900:
+		guard += 1
+		_bot_walk_to(wt, 0.7, 0.5)
+		await get_tree().physics_frame
+	_bot_stop()
+	var wrong_ok := mosaic.wrongs == 1 and mosaic.index == 0
+	guard = 0
+	while mosaic.phase != "input" and guard < 3600:
+		guard += 1
+		await get_tree().physics_frame
+	# 4) the replay medallion shows the order again on demand
+	var replays_before := mosaic.replays
+	guard = 0
+	while mosaic.replays == replays_before and guard < 900:
+		guard += 1
+		_bot_walk_to(mosaic.center, 0.7, 0.5)
+		await get_tree().physics_frame
+	_bot_stop()
+	var medallion_ok := mosaic.replays == replays_before + 1
+	guard = 0
+	while mosaic.phase != "input" and guard < 3600:
+		guard += 1
+		await get_tree().physics_frame
+	# 5) repeat the order correctly with the real physics
+	for step_i in range(mosaic.sequence.size()):
+		var target: Vector3 = mosaic.tile_pos(mosaic.sequence[step_i])
+		guard = 0
+		while mosaic.index == step_i and not mosaic.solved and guard < 900:
+			guard += 1
+			_bot_walk_to(target, 0.7, 0.5)
+			await get_tree().physics_frame
+		_bot_stop()
+	await get_tree().physics_frame
+	var finish_done := false
+	for it in items:
+		if str((it["data"] as Dictionary)["kind"]) == "mosaic_finish":
+			finish_done = bool(it["done"])
+	print("  mosaic: difficulty=%d tiles=%d order=%d solved=%s finish=%s ran_through_ok=%s wrong_replays=%s medallion=%s wrongs=%d index=%d phase=%s" % [GameState.difficulty, mosaic.tiles.size(), mosaic.sequence.size(), mosaic.solved, finish_done, ran_through, wrong_ok, medallion_ok, mosaic.wrongs, mosaic.index, mosaic.phase])
+	if not (mosaic.solved and finish_done and ran_through and wrong_ok and medallion_ok):
+		failures += 1
+	player.global_position = spawn_point
+	player.velocity = Vector3.ZERO
+	return failures
+
+## Selftest helper: steer the player towards a point (stick strength `power`, slows down inside `slow_radius`).
+func _bot_walk_to(target: Vector3, power: float, slow_radius: float) -> void:
+	var d := Vector2(target.x - player.global_position.x, target.z - player.global_position.z)
+	if d.length() < 0.35:
+		GameState.move_vector = Vector2.ZERO
+		return
+	var k := power if slow_radius <= 0.0 or d.length() > 2.0 else power * clampf(d.length() / 2.0 + 0.25, 0.25, 1.0)
+	GameState.move_vector = d.normalized() * k
+
+func _bot_stop() -> void:
+	GameState.move_vector = Vector2.ZERO
+
 func _target_at(t: Dictionary, ahead: float) -> Vector3:
 	var b: Vector3 = t["base"]
 	if float(t["amp"]) == 0.0:
@@ -1772,6 +1902,27 @@ func _selftest_difficulty_sanity() -> int:
 				bad += 1
 			prev = float(z)
 		if prev - float(ld.get("finish_z", 0.0)) > 40.0:
+			bad += 1
+	if level.has("mosaic"):
+		var md: Dictionary = level["mosaic"]
+		var mc := int(md.get("count", 0))
+		var ms := int(md.get("seq_len", 0))
+		if mc < 3 or mc > 6 or ms < 2 or ms > mc:
+			bad += 1
+		if float(md.get("show_time", 0.0)) < 0.5 or float(md.get("tile_radius", 0.0)) < 1.2:
+			bad += 1
+		# running straight across a tile (full speed, through the middle) must take less than the dwell time
+		if float(md.get("dwell", 0.0)) < 2.0 * float(md.get("tile_radius", 0.0)) / base_run_speed + 0.1:
+			bad += 1
+		# neighbouring tiles must not touch, and the order must only name existing tiles
+		var mr := float(md.get("ring_radius", 0.0))
+		if mr * 2.0 * sin(PI / float(maxi(mc, 1))) < float(md.get("tile_radius", 0.0)) * 2.0 + 2.0:
+			bad += 1
+		var named := 0
+		for o in (md.get("order", []) as Array):
+			if int(o) < mc:
+				named += 1
+		if named < ms:
 			bad += 1
 	var orders := []
 	for it in items:

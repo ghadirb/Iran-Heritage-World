@@ -39,6 +39,10 @@ const LAMP_WALK_LIMIT := [4.6, 4.0, 3.6]   # m/s above which oil spills (stick h
 const LAMP_DRAIN := [0.16, 0.24, 0.34]     # oil per second while running
 const LAMP_JUMP_COST := [0.10, 0.18, 0.28]
 const LAMP_NEED := [0.10, 0.25, 0.40]      # oil needed at the tower
+const MOSAIC_COUNT := [4, 5, 6]            # tiles in the court
+const MOSAIC_SEQ_LEN := [3, 4, 5]          # tiles in the order to repeat (never more than the tiles)
+const MOSAIC_SHOW_TIME := [1.1, 0.85, 0.65]   # seconds each tile stays lit while the order is shown
+const MOSAIC_TILE_RADIUS := [1.6, 1.5, 1.35]
 
 ## Challenge mode counts change, so these objective texts avoid numbers.
 const CHALLENGE_TEXT := {
@@ -90,6 +94,7 @@ static func apply(src: Dictionary, d: int) -> Dictionary:
 	_apply_rolling_course(lv, d)
 	_apply_turning_bridge(lv, d)
 	_apply_lamp_road(lv, d)
+	_apply_mosaic(lv, d)
 	return lv
 
 ## Same route, harder pursuit: less lead, more gates, and narrower safe gaps.
@@ -137,6 +142,16 @@ static func _apply_lamp_road(lv: Dictionary, d: int) -> void:
 	lamp["drain"] = LAMP_DRAIN[d]
 	lamp["jump_cost"] = LAMP_JUMP_COST[d]
 	lamp["need"] = LAMP_NEED[d]
+
+## Same court: more tiles, a longer order, a faster show and slightly smaller tiles.
+static func _apply_mosaic(lv: Dictionary, d: int) -> void:
+	if not lv.has("mosaic"):
+		return
+	var mosaic: Dictionary = lv["mosaic"]
+	mosaic["count"] = MOSAIC_COUNT[d]
+	mosaic["seq_len"] = MOSAIC_SEQ_LEN[d]
+	mosaic["show_time"] = MOSAIC_SHOW_TIME[d]
+	mosaic["tile_radius"] = MOSAIC_TILE_RADIUS[d]
 
 ## Clues that sit right on the path are easy to spot; push them off to the sides.
 static func _scatter_clues(lv: Dictionary, items: Array, d: int) -> void:
