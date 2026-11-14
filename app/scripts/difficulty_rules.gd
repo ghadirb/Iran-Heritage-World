@@ -28,6 +28,10 @@ const WATCH_OMEGA := [26.0, 34.0, 44.0]       # beam sweep, degrees per second
 const WATCH_HALF := [18.0, 21.0, 24.0]        # beam half-angle, degrees
 const WATCH_RANGE := [19.0, 21.0, 23.0]
 const WATCH_GRACE := [0.55, 0.4, 0.3]         # seconds in light before being seen
+const ICE_ACCEL := [6.0, 4.5, 3.2]           # grip on the ice (m/s^2); lower = more sliding
+const ICE_HOLES := [6, 9, 13]
+const ICE_HOLE_R := [1.8, 2.1, 2.4]
+const ICE_CORRIDOR := [3.2, 2.6, 2.1]         # clear lane between hole edge and the route
 const WIND_COUNT := [3, 4, 5]
 const WIND_SPEED := [0.85, 1.15, 1.45]
 const WIND_SWEEP := [8.0, 10.0, 12.0]
@@ -100,6 +104,7 @@ static func apply(src: Dictionary, d: int) -> Dictionary:
 	_apply_lamp_road(lv, d)
 	_apply_mosaic(lv, d)
 	_apply_night_watch(lv, d)
+	_apply_ice_lake(lv, d)
 	_apply_light(lv, d)
 	return lv
 
@@ -170,6 +175,16 @@ static func _apply_night_watch(lv: Dictionary, d: int) -> void:
 	w["grace"] = WATCH_GRACE[d]
 	if d >= 2:
 		w["towers"] = (w["towers"] as Array) + (w["hard_towers"] as Array)
+
+## Same lake: slipperier ice, more and bigger holes, a narrower safe lane.
+static func _apply_ice_lake(lv: Dictionary, d: int) -> void:
+	if not lv.has("ice_lake"):
+		return
+	var ice: Dictionary = lv["ice_lake"]
+	ice["accel"] = ICE_ACCEL[d]
+	ice["hole_count"] = ICE_HOLES[d]
+	ice["hole_radius"] = ICE_HOLE_R[d]
+	ice["corridor"] = ICE_CORRIDOR[d]
 
 ## Same hall: one, two or three mirrors in the chain (each difficulty has its own layout in the level data).
 static func _apply_light(lv: Dictionary, d: int) -> void:

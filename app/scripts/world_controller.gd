@@ -64,12 +64,15 @@ var lamp_carry: LampCarryController
 var mosaic: MosaicCourtController
 var mirror_hall: MirrorHallController
 var night_watch: NightWatchController
+var ice_lake: IceLakeController
+var base_acceleration := 28.0
 
 func _ready() -> void:
 	selftest = OS.get_cmdline_user_args().has("--selftest")
 	player = PlayerController.new()
 	player.name = "Player"
 	base_run_speed = player.run_speed
+	base_acceleration = player.acceleration
 	var shape := CollisionShape3D.new()
 	var capsule := CapsuleShape3D.new()
 	capsule.radius = 0.42
@@ -185,6 +188,8 @@ func load_level(index: int, announce: bool = true) -> void:
 	mosaic = null
 	mirror_hall = null
 	night_watch = null
+	ice_lake = null
+	player.acceleration = base_acceleration
 	shoot_cooldown = 0.0
 	archery_time = 0.0
 	arrows_fired = 0
@@ -232,6 +237,8 @@ func load_level(index: int, announce: bool = true) -> void:
 		_build_mirror_hall()
 	if level.has("night_watch"):
 		_build_night_watch()
+	if level.has("ice_lake"):
+		_build_ice_lake()
 	_setup_bow()
 	_build_ambient_particles()
 	var sp: Vector2 = level["spawn"]
@@ -257,6 +264,8 @@ func load_level(index: int, announce: bool = true) -> void:
 		mirror_hall.reset()
 	if night_watch:
 		night_watch.reset()
+	if ice_lake:
+		ice_lake.reset()
 	player.input_enabled = true
 	hud.close_all_modals()
 	hud.set_level_info(str(level["title"]), str(level["subtitle"]))
@@ -744,6 +753,37 @@ func _update_mirror_hall(delta: float) -> void:
 			_msg("mirror_solved", 3.5)
 			_check_finish()
 
+# ---------- ice lake (chapter 16): slide across the ice, stone islands give grip ----------
+
+func _build_ice_lake() -> void:
+	ice_lake = IceLakeController.new()
+	ice_lake.build(level_root, terrain, level, level["spawn"])
+
+func _update_ice_lake(delta: float) -> void:
+	if ice_lake == null:
+		return
+	var result := ice_lake.step(delta, player.global_position)
+	player.acceleration = ice_lake.ice_accel if ice_lake.on_ice else base_acceleration
+	if ice_lake.last_island >= 0:
+		checkpoint = ice_lake.island_center(ice_lake.last_island) + Vector3(0, 1.2, 0)
+	match result:
+		"start":
+			_msg("ice_start", 5.0)
+		"plunge":
+			mistakes += 1
+			if ice_lake.last_island < 0:
+				checkpoint = spawn_point
+			_respawn(false)
+			player.acceleration = base_acceleration
+			_msg("ice_plunge", 4.0)
+		"arrived":
+			player.acceleration = base_acceleration
+			for it in items:
+				if str((it["data"] as Dictionary)["kind"]) == "ice_finish" and not bool(it["done"]):
+					_mark_done(it)
+			_msg("ice_safe", 3.5)
+			_check_finish()
+
 # ---------- night watch (chapter 15): cross beams of light, rest in shade ----------
 
 func _build_night_watch() -> void:
@@ -920,6 +960,7 @@ func _physics_process(delta: float) -> void:
 	_update_mosaic(delta)
 	_update_mirror_hall(delta)
 	_update_night_watch(delta)
+	_update_ice_lake(delta)
 	if moving_stones.is_empty():
 		return
 	chain_time += delta
@@ -1012,7 +1053,7 @@ func _build_interactables() -> void:
 			"roll_finish":
 				node = PropFactory.make_clue_marker("clue")
 				pos += Vector3(0, 0.9, 0)
-			"turn_finish", "lamp_finish", "mosaic_finish", "mirror_finish", "watch_finish":
+			"turn_finish", "lamp_finish", "mosaic_finish", "mirror_finish", "watch_finish", "ice_finish":
 				node = PropFactory.make_clue_marker("clue")
 				pos += Vector3(0, 0.9, 0)
 			"npc":
@@ -1442,6 +1483,8 @@ func _selftest_level(i: int) -> int:
 		failures += await _selftest_mirror_hall()
 	if level.has("night_watch"):
 		failures += await _selftest_night_watch()
+	if level.has("ice_lake"):
+		failures += await _selftest_ice_lake()
 	for it in items:
 		if not bool((it["data"] as Dictionary).get("finale", false)):
 			it["done"] = true
@@ -1869,6 +1912,66 @@ func _selftest_mosaic() -> int:
 ## in opposite directions, and turning the mirrors to the solution must put the light on the lantern.
 ## Standing in a beam must get the courier caught, shade must be safe, and a careful bot (waits in the shade
 ## until the way to the next awning is clear, with real physics) must reach the last station.
+func _selftest_ice_lake() -> int:
+	var ice := ice_lake
+	if ice == null:
+		print("  ice_lake: controller missing")
+		return 1
+	var corridor_pt := ice.island_center(0).lerp(ice.island_center(1), 0.5)
+	# 1) the ice really slides: run, let go, and the courier keeps moving
+	ice.reset()
+	player.global_position = corridor_pt + Vector3(0, 1.0, 0)
+	player.velocity = Vector3.ZERO
+	GameState.move_vector = Vector2(0, -1)
+	for _f in range(40):
+		await get_tree().physics_frame
+	GameState.move_vector = Vector2.ZERO
+	for _f in range(10):
+		await get_tree().physics_frame
+	var slide_speed := Vector2(player.velocity.x, player.velocity.z).length()
+	var slides := slide_speed > 0.8
+	# 2) a hole drops the courier back to the last island (or the spawn)
+	var hole := ice.holes[0] if not ice.holes.is_empty() else Vector3(0, 0, 0)
+	player.global_position = Vector3(hole.x, ice.ground_y + 0.6, hole.y)
+	player.velocity = Vector3.ZERO
+	GameState.move_vector = Vector2.ZERO
+	for _f in range(20):
+		await get_tree().physics_frame
+	var plunged := ice.plunges > 0
+	# 3) a PD-steering bot follows the lane islands with the real, slippery physics
+	ice.reset()
+	player.global_position = spawn_point
+	player.velocity = Vector3.ZERO
+	checkpoint = spawn_point
+	for _f in range(6):
+		await get_tree().physics_frame
+	var route: Array[Vector2] = [Vector2(spawn_point.x, spawn_point.z)]
+	for i in range(ice.islands.size()):
+		route.append(ice.islands[i])
+	var seg := 0
+	for _frame in range(7000):
+		if ice.arrived:
+			break
+		var p := Vector2(player.global_position.x, player.global_position.z)
+		if p.distance_to(route[seg + 1]) < 2.2 and seg < route.size() - 2:
+			seg += 1
+		var a := route[seg]
+		var b := route[seg + 1]
+		var dir := (b - a).normalized()
+		var cp := Geometry2D.get_closest_point_to_segment(p, a, b)
+		var lateral := cp - p
+		var v_des := dir * 3.4 + lateral.limit_length(2.5) * 1.3
+		GameState.move_vector = (v_des / base_run_speed).limit_length(1.0)
+		await get_tree().physics_frame
+	GameState.move_vector = Vector2.ZERO
+	var finish_done := false
+	for it in items:
+		if str((it["data"] as Dictionary)["kind"]) == "ice_finish":
+			finish_done = bool(it["done"])
+	print("  ice_lake: difficulty=%d holes=%d arrived=%s finish=%s slides=%s(%.1f) hole_plunges=%s bot_plunges=%d" % [GameState.difficulty, ice.holes.size(), ice.arrived, finish_done, slides, slide_speed, plunged, ice.plunges])
+	player.acceleration = base_acceleration
+	return 0 if (ice.arrived and finish_done and slides and plunged and ice.plunges == 0) else 1
+
 func _selftest_night_watch() -> int:
 	var nw := night_watch
 	if nw == null:
@@ -2167,6 +2270,16 @@ func _selftest_difficulty_sanity() -> int:
 			for dj in range(di + 1, disc_list.size()):
 				if dv.distance_to(disc_list[dj]) < float(ld["disc_radius"]) * 2.0 + 0.5:
 					bad += 1
+	if level.has("ice_lake"):
+		var il: Dictionary = level["ice_lake"]
+		var isl: Array = il["islands"]
+		var prev_p: Vector2 = level["spawn"]
+		for q in isl:
+			if prev_p.distance_to(q) > 32.0:
+				bad += 1   # islands must be close enough to slide between
+			prev_p = q
+		if float(il["accel"]) < 2.5 or float(il["corridor"]) < 1.8 or int(il["hole_count"]) < 1:
+			bad += 1
 	if level.has("night_watch"):
 		var nd: Dictionary = level["night_watch"]
 		var nz: Array = nd["zones"]
