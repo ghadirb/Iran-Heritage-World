@@ -77,6 +77,8 @@ func _physics_process(delta: float) -> void:
 		input_vector = Input.get_vector("move_left", "move_right", "move_forward", "move_back") + GameState.move_vector
 		if input_vector.length() > 1.0:
 			input_vector = input_vector.normalized()
+		if Input.is_key_pressed(KEY_SHIFT):
+			input_vector *= 0.55   # walk slowly (keyboard); the touch stick is already analog
 		if Input.is_action_just_pressed("jump"):
 			request_jump()
 	var forward := Vector3(-sin(yaw), 0.0, -cos(yaw))

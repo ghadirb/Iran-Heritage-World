@@ -35,6 +35,10 @@ const TURNING_BEAM_COUNT := [4, 5, 6]
 const TURNING_BEAM_SPEED := [0.25, 0.42, 0.58]
 const TURNING_BEAM_ANGLE := [0.16, 0.27, 0.38]
 const TURNING_BEAM_WIDTH := [3.1, 2.75, 2.4]
+const LAMP_WALK_LIMIT := [4.6, 4.0, 3.6]   # m/s above which oil spills (stick half-way ~3.4)
+const LAMP_DRAIN := [0.16, 0.24, 0.34]     # oil per second while running
+const LAMP_JUMP_COST := [0.10, 0.18, 0.28]
+const LAMP_NEED := [0.10, 0.25, 0.40]      # oil needed at the tower
 
 ## Challenge mode counts change, so these objective texts avoid numbers.
 const CHALLENGE_TEXT := {
@@ -85,6 +89,7 @@ static func apply(src: Dictionary, d: int) -> Dictionary:
 	_apply_wind_course(lv, d)
 	_apply_rolling_course(lv, d)
 	_apply_turning_bridge(lv, d)
+	_apply_lamp_road(lv, d)
 	return lv
 
 ## Same route, harder pursuit: less lead, more gates, and narrower safe gaps.
@@ -123,6 +128,15 @@ static func _apply_turning_bridge(lv: Dictionary, d: int) -> void:
 	bridge["speed"] = TURNING_BEAM_SPEED[d]
 	bridge["angle"] = TURNING_BEAM_ANGLE[d]
 	bridge["width"] = TURNING_BEAM_WIDTH[d]
+
+static func _apply_lamp_road(lv: Dictionary, d: int) -> void:
+	if not lv.has("lamp_road"):
+		return
+	var lamp: Dictionary = lv["lamp_road"]
+	lamp["walk_limit"] = LAMP_WALK_LIMIT[d]
+	lamp["drain"] = LAMP_DRAIN[d]
+	lamp["jump_cost"] = LAMP_JUMP_COST[d]
+	lamp["need"] = LAMP_NEED[d]
 
 ## Clues that sit right on the path are easy to spot; push them off to the sides.
 static func _scatter_clues(lv: Dictionary, items: Array, d: int) -> void:

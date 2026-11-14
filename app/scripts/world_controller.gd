@@ -60,6 +60,7 @@ var chase: ChaseController
 var wind_course: WindCourseController
 var rolling_course: RollingCourseController
 var turning_bridge: TurningBridgeController
+var lamp_carry: LampCarryController
 
 func _ready() -> void:
 	selftest = OS.get_cmdline_user_args().has("--selftest")
@@ -177,6 +178,7 @@ func load_level(index: int, announce: bool = true) -> void:
 	wind_course = null
 	rolling_course = null
 	turning_bridge = null
+	lamp_carry = null
 	shoot_cooldown = 0.0
 	archery_time = 0.0
 	arrows_fired = 0
@@ -216,6 +218,8 @@ func load_level(index: int, announce: bool = true) -> void:
 		_build_rolling_course()
 	if level.has("turning_bridge"):
 		_build_turning_bridge()
+	if level.has("lamp_road"):
+		_build_lamp_road()
 	_setup_bow()
 	_build_ambient_particles()
 	var sp: Vector2 = level["spawn"]
@@ -233,6 +237,8 @@ func load_level(index: int, announce: bool = true) -> void:
 		rolling_course.reset()
 	if turning_bridge:
 		turning_bridge.reset()
+	if lamp_carry:
+		lamp_carry.reset()
 	player.input_enabled = true
 	hud.close_all_modals()
 	hud.set_level_info(str(level["title"]), str(level["subtitle"]))
@@ -640,6 +646,39 @@ func _update_turning_bridge(delta: float) -> void:
 		_msg("turning_safe", 3.5)
 		_check_finish()
 
+# ---------- lamp road (chapter 12): carry a lamp with calm steps ----------
+
+func _build_lamp_road() -> void:
+	lamp_carry = LampCarryController.new()
+	lamp_carry.build(level_root, terrain, level)
+
+func _update_lamp_road(delta: float) -> void:
+	if lamp_carry == null:
+		return
+	var result := lamp_carry.step(delta, player.global_position, player.velocity, player.is_on_floor(), player.art.rotation.y)
+	if result == "refill" or result == "station":
+		checkpoint = lamp_carry.last_station + Vector3(0, 1.2, 0)
+	match result:
+		"refill":
+			_msg("lamp_refill", 3.0)
+		"warn":
+			_msg("lamp_warn", 3.0)
+		"low":
+			_msg("lamp_low", 4.0)
+		"out":
+			mistakes += 1
+			if lamp_carry.last_station == Vector3.ZERO:
+				checkpoint = spawn_point
+			_respawn(false)
+			lamp_carry.after_out()
+			_msg("lamp_out", 4.0)
+		"arrived":
+			for it in items:
+				if str((it["data"] as Dictionary)["kind"]) == "lamp_finish" and not bool(it["done"]):
+					_mark_done(it)
+			_msg("lamp_safe", 3.5)
+			_check_finish()
+
 func _aim_ray() -> Dictionary:
 	var cam := player.camera
 	return {"origin": cam.global_position, "dir": -cam.global_transform.basis.z}
@@ -783,6 +822,7 @@ func _physics_process(delta: float) -> void:
 	_update_wind_course(delta)
 	_update_rolling_course()
 	_update_turning_bridge(delta)
+	_update_lamp_road(delta)
 	if moving_stones.is_empty():
 		return
 	chain_time += delta
@@ -875,7 +915,7 @@ func _build_interactables() -> void:
 			"roll_finish":
 				node = PropFactory.make_clue_marker("clue")
 				pos += Vector3(0, 0.9, 0)
-			"turn_finish":
+			"turn_finish", "lamp_finish":
 				node = PropFactory.make_clue_marker("clue")
 				pos += Vector3(0, 0.9, 0)
 			"npc":
@@ -1247,9 +1287,16 @@ func _report_missing_voice() -> void:
 func _run_selftest() -> void:
 	var failures := 0
 	_report_missing_voice()
+	# developer filters: --only=<level index>  --diff=<0..2>
+	var only := int(_arg_value("--only")) if _arg_value("--only") != "" else -1
+	var only_diff := int(_arg_value("--diff")) if _arg_value("--diff") != "" else -1
 	for diff in range(3):
+		if only_diff >= 0 and diff != only_diff:
+			continue
 		GameState.difficulty = diff
 		for i in range(LevelData.LEVELS.size()):
+			if only >= 0 and i != only:
+				continue
 			failures += await _selftest_level(i)
 	GameState.difficulty = 1
 	hud.show_main_menu()
@@ -1277,6 +1324,8 @@ func _selftest_level(i: int) -> int:
 		failures += await _selftest_rolling_course()
 	if level.has("turning_bridge"):
 		failures += await _selftest_turning_bridge()
+	if level.has("lamp_road"):
+		failures += await _selftest_lamp_road()
 	for it in items:
 		if not bool((it["data"] as Dictionary).get("finale", false)):
 			it["done"] = true
@@ -1584,6 +1633,40 @@ func _selftest_turning_bridge() -> int:
 	player.velocity = Vector3.ZERO
 	return 0 if crossed and finish_done and recoveries <= 4 else 1
 
+## Sprinting must spill oil; a calm walker (stick half-way) must reach the tower with the real physics.
+func _selftest_lamp_road() -> int:
+	if lamp_carry == null:
+		print("  lamp road: controller missing")
+		return 1
+	GameState.move_vector = Vector2(0, -1)
+	for _f in range(120):
+		await get_tree().physics_frame
+	var drained := lamp_carry.oil < 0.99
+	GameState.move_vector = Vector2.ZERO
+	player.global_position = spawn_point
+	player.velocity = Vector3.ZERO
+	lamp_carry.reset()
+	for _f in range(10):
+		await get_tree().physics_frame
+	for _frame in range(5200):
+		if lamp_carry.arrived:
+			break
+		var target := lamp_carry.guide_point(player.global_position)
+		var d := Vector2(target.x - player.global_position.x, target.z - player.global_position.z)
+		GameState.move_vector = d.normalized() * 0.55 if d.length() > 0.5 else Vector2.ZERO
+		await get_tree().physics_frame
+		if player.global_position.y < kill_y:
+			_respawn(false)
+	GameState.move_vector = Vector2.ZERO
+	var finish_done := false
+	for it in items:
+		if str((it["data"] as Dictionary)["kind"]) == "lamp_finish":
+			finish_done = bool(it["done"])
+	print("  lamp road: difficulty=%d arrived=%s finish=%s sprint_drains=%s outs=%d" % [GameState.difficulty, lamp_carry.arrived, finish_done, drained, lamp_carry.outs])
+	player.global_position = spawn_point
+	player.velocity = Vector3.ZERO
+	return 0 if lamp_carry.arrived and finish_done and drained and lamp_carry.outs == 0 else 1
+
 func _target_at(t: Dictionary, ahead: float) -> Vector3:
 	var b: Vector3 = t["base"]
 	if float(t["amp"]) == 0.0:
@@ -1662,6 +1745,20 @@ func _selftest_difficulty_sanity() -> int:
 		if int(td.get("count", 0)) < 3 or int(td.get("count", 0)) > 6:
 			bad += 1
 		if float(td.get("speed", 0.0)) <= 0.0 or float(td.get("angle", 0.0)) <= 0.0 or float(td.get("width", 0.0)) < 1.8:
+			bad += 1
+	if level.has("lamp_road"):
+		var ld: Dictionary = level["lamp_road"]
+		var zs: Array = ld.get("stations", [])
+		if zs.size() < 2 or float(ld.get("drain", 0.0)) <= 0.0 or float(ld.get("jump_cost", 0.0)) <= 0.0:
+			bad += 1
+		if float(ld.get("walk_limit", 0.0)) < base_run_speed * 0.55 + 0.1 or float(ld.get("need", 1.0)) > 0.5:
+			bad += 1
+		var prev := 8.0
+		for z in zs:
+			if prev - float(z) > 40.0 or float(z) >= prev:
+				bad += 1
+			prev = float(z)
+		if prev - float(ld.get("finish_z", 0.0)) > 40.0:
 			bad += 1
 	var orders := []
 	for it in items:
