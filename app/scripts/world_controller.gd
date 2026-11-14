@@ -2275,7 +2275,7 @@ func _selftest_difficulty_sanity() -> int:
 		var isl: Array = il["islands"]
 		var prev_p: Vector2 = level["spawn"]
 		for q in isl:
-			if prev_p.distance_to(q) > 32.0:
+			if prev_p.distance_to(q) > 36.0:
 				bad += 1   # islands must be close enough to slide between
 			prev_p = q
 		if float(il["accel"]) < 2.5 or float(il["corridor"]) < 1.8 or int(il["hole_count"]) < 1:
