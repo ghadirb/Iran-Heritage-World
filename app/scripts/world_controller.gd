@@ -62,6 +62,7 @@ var rolling_course: RollingCourseController
 var turning_bridge: TurningBridgeController
 var lamp_carry: LampCarryController
 var mosaic: MosaicCourtController
+var mirror_hall: MirrorHallController
 
 func _ready() -> void:
 	selftest = OS.get_cmdline_user_args().has("--selftest")
@@ -181,6 +182,7 @@ func load_level(index: int, announce: bool = true) -> void:
 	turning_bridge = null
 	lamp_carry = null
 	mosaic = null
+	mirror_hall = null
 	shoot_cooldown = 0.0
 	archery_time = 0.0
 	arrows_fired = 0
@@ -224,6 +226,8 @@ func load_level(index: int, announce: bool = true) -> void:
 		_build_lamp_road()
 	if level.has("mosaic"):
 		_build_mosaic()
+	if level.has("light"):
+		_build_mirror_hall()
 	_setup_bow()
 	_build_ambient_particles()
 	var sp: Vector2 = level["spawn"]
@@ -245,6 +249,8 @@ func load_level(index: int, announce: bool = true) -> void:
 		lamp_carry.reset()
 	if mosaic:
 		mosaic.reset()
+	if mirror_hall:
+		mirror_hall.reset()
 	player.input_enabled = true
 	hud.close_all_modals()
 	hud.set_level_info(str(level["title"]), str(level["subtitle"]))
@@ -712,6 +718,26 @@ func _update_mosaic(delta: float) -> void:
 			_msg("mosaic_solved", 3.5)
 			_check_finish()
 
+# ---------- mirror hall (chapter 14): turn mirrors by standing on discs until the beam reaches the lantern ----------
+
+func _build_mirror_hall() -> void:
+	mirror_hall = MirrorHallController.new()
+	mirror_hall.build(level_root, terrain, level)
+
+func _update_mirror_hall(delta: float) -> void:
+	if mirror_hall == null:
+		return
+	var result := mirror_hall.step(delta, player.global_position, player.is_on_floor())
+	match result:
+		"watch":
+			_msg("mirror_watch", 4.0)
+		"solved":
+			for it in items:
+				if str((it["data"] as Dictionary)["kind"]) == "mirror_finish" and not bool(it["done"]):
+					_mark_done(it)
+			_msg("mirror_solved", 3.5)
+			_check_finish()
+
 func _aim_ray() -> Dictionary:
 	var cam := player.camera
 	return {"origin": cam.global_position, "dir": -cam.global_transform.basis.z}
@@ -857,6 +883,7 @@ func _physics_process(delta: float) -> void:
 	_update_turning_bridge(delta)
 	_update_lamp_road(delta)
 	_update_mosaic(delta)
+	_update_mirror_hall(delta)
 	if moving_stones.is_empty():
 		return
 	chain_time += delta
@@ -949,7 +976,7 @@ func _build_interactables() -> void:
 			"roll_finish":
 				node = PropFactory.make_clue_marker("clue")
 				pos += Vector3(0, 0.9, 0)
-			"turn_finish", "lamp_finish", "mosaic_finish":
+			"turn_finish", "lamp_finish", "mosaic_finish", "mirror_finish":
 				node = PropFactory.make_clue_marker("clue")
 				pos += Vector3(0, 0.9, 0)
 			"npc":
@@ -1375,6 +1402,8 @@ func _selftest_level(i: int) -> int:
 		failures += await _selftest_lamp_road()
 	if level.has("mosaic"):
 		failures += await _selftest_mosaic()
+	if level.has("light"):
+		failures += await _selftest_mirror_hall()
 	for it in items:
 		if not bool((it["data"] as Dictionary).get("finale", false)):
 			it["done"] = true
@@ -1798,6 +1827,70 @@ func _selftest_mosaic() -> int:
 	player.velocity = Vector3.ZERO
 	return failures
 
+## Bot that really walks: running across a disc must not turn a mirror, the yellow/blue discs must turn it
+## in opposite directions, and turning the mirrors to the solution must put the light on the lantern.
+func _selftest_mirror_hall() -> int:
+	var hall := mirror_hall
+	if hall == null:
+		print("  mirror_hall: controller missing")
+		return 1
+	var failures := 0
+	var guard := 0
+	# 1) walk towards the first mirror until the hall wakes up
+	var m0 := hall.mirror_pos(0)
+	while hall.phase != "input" and guard < 3000:
+		guard += 1
+		_bot_walk_to(Vector3(m0.x, 0.0, m0.y + 12.0), 0.8, 1.0)
+		await get_tree().physics_frame
+	_bot_stop()
+	if hall.phase != "input":
+		print("  mirror_hall: never woke up")
+		return 1
+	# 2) run straight across the first yellow disc without stopping: nothing may turn
+	var dp := hall.disc_pos(0, true)
+	var disc3 := Vector3(dp.x, 0.0, dp.y)
+	var run_dir := Vector3(disc3.x - player.global_position.x, 0.0, disc3.z - player.global_position.z).normalized()
+	var beyond := disc3 + run_dir * (hall.disc_radius + 3.0)
+	var turns_before := hall.turns
+	for _f in range(300):
+		if Vector2(player.global_position.x - beyond.x, player.global_position.z - beyond.z).length() < 0.8:
+			break
+		_bot_walk_to(beyond, 1.0, 0.0)
+		await get_tree().physics_frame
+	_bot_stop()
+	var ran_through := hall.turns == turns_before
+	# 3) turn every mirror to its solution (shortest way: yellow = clockwise, blue = counter-clockwise)
+	var used_plus := 0
+	var used_minus := 0
+	for i in range(hall.mirrors.size()):
+		var k := hall.steps_needed(i)
+		if k == 0:
+			continue
+		var plus := k > 0
+		if plus:
+			used_plus += 1
+		else:
+			used_minus += 1
+		var target_disc := hall.disc_pos(i, plus)
+		var td := Vector3(target_disc.x, 0.0, target_disc.y)
+		guard = 0
+		while hall.steps_needed(i) != 0 and not hall.solved and guard < 1500:
+			guard += 1
+			_bot_walk_to(td, 0.8, 0.5)
+			await get_tree().physics_frame
+		_bot_stop()
+	await get_tree().physics_frame
+	var finish_done := false
+	for it in items:
+		if str((it["data"] as Dictionary)["kind"]) == "mirror_finish":
+			finish_done = bool(it["done"])
+	print("  mirror_hall: difficulty=%d mirrors=%d solved=%s finish=%s ran_through_ok=%s turns=%d yellow=%d blue=%d" % [GameState.difficulty, hall.mirrors.size(), hall.solved, finish_done, ran_through, hall.turns, used_plus, used_minus])
+	if not (hall.solved and finish_done and ran_through):
+		failures += 1
+	player.global_position = spawn_point
+	player.velocity = Vector3.ZERO
+	return failures
+
 ## Selftest helper: steer the player towards a point (stick strength `power`, slows down inside `slow_radius`).
 func _bot_walk_to(target: Vector3, power: float, slow_radius: float) -> void:
 	var d := Vector2(target.x - player.global_position.x, target.z - player.global_position.z)
@@ -1924,6 +2017,44 @@ func _selftest_difficulty_sanity() -> int:
 				named += 1
 		if named < ms:
 			bad += 1
+	if level.has("light"):
+		var ld: Dictionary = level["light"]
+		var lay: Dictionary = ld["layout"]
+		var half := float(ld["mirror_half"])
+		var solution := []
+		var start := []
+		var lms := lay["mirrors"] as Array
+		for mm in lms:
+			solution.append({"pos": mm["pos"], "phi": deg_to_rad(float(mm["solution"]))})
+			start.append({"pos": mm["pos"], "phi": deg_to_rad(float(mm["start"]))})
+		var a0 := deg_to_rad(float(lay.get("angle", 0.0)))
+		var sol_trace := MirrorHallController.trace(lay["source"], a0, solution, lay["target"], float(ld["target_radius"]), half)
+		var start_trace := MirrorHallController.trace(lay["source"], a0, start, lay["target"], float(ld["target_radius"]), half)
+		if not bool(sol_trace["hit"]) or bool(start_trace["hit"]):
+			bad += 1   # the solution must reach the lantern and the starting position must not
+		# turning a disc needs a longer stand than running across it (full speed, through the middle)
+		if float(ld["delay"]) < 2.0 * float(ld["disc_radius"]) / base_run_speed + 0.1:
+			bad += 1
+		# discs must stay off the solved beam and away from each other, the source and the lantern
+		var pts: Array = sol_trace["points"]
+		var disc_list := []
+		for mm in lms:
+			var mp: Vector2 = mm["pos"]
+			disc_list.append(mp + Vector2(2.6, 2.6))
+			disc_list.append(mp + Vector2(-2.6, 2.6))
+		for di in range(disc_list.size()):
+			var dv: Vector2 = disc_list[di]
+			for pi in range(pts.size() - 1):
+				var sa: Vector2 = pts[pi]
+				var sb: Vector2 = pts[pi + 1]
+				var cp := Geometry2D.get_closest_point_to_segment(dv, sa, sb)
+				if cp.distance_to(dv) < float(ld["disc_radius"]) + 0.8:
+					bad += 1
+			if dv.distance_to(lay["target"]) < float(ld["disc_radius"]) + 1.5 or dv.distance_to(lay["source"]) < float(ld["disc_radius"]) + 1.5:
+				bad += 1
+			for dj in range(di + 1, disc_list.size()):
+				if dv.distance_to(disc_list[dj]) < float(ld["disc_radius"]) * 2.0 + 0.5:
+					bad += 1
 	var orders := []
 	for it in items:
 		if str((it["data"] as Dictionary)["kind"]) == "brazier":

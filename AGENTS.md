@@ -24,6 +24,7 @@ Mechanics already in the game (reuse before inventing):
 | turning_bridge | **balance/jump**: cross narrow rotating beams over a chasm; falling only returns to a static rest pad | `turning_bridge_controller.gd`, `_update_turning_bridge`, `_selftest_turning_bridge` |
 | caravan_lamp | **calm walking**: carry a lamp; running (above `walk_limit`) and jumping spill oil, static oil jars refill and are the checkpoints; lamp out = back to last jar; tower needs `need` oil | `lamp_carry_controller.gd`, `_update_lamp_road`, `_selftest_lamp_road` |
 | mosaic_court | **memory + standing**: tiles light up in an order; repeat it by standing on each tile for `dwell` seconds (crossing at full speed must take less than `dwell`, enforced in the sanity check); a wrong tile only replays the order, the centre medallion replays it on demand and keeps progress; no time limit, no fall | `mosaic_court_controller.gd`, `_update_mosaic`, `_selftest_mosaic` |
+| mirror_hall | **light + turning**: stand on the yellow (clockwise) / blue (counter-clockwise) disc beside a mirror to turn it in 15° steps (first turn needs a longer stand than running across the disc, enforced in the sanity check); the beam is traced with real reflection maths (`MirrorHallController.trace`) and must reach the lantern; 1/2/3 mirrors by difficulty; nothing can fail | `mirror_hall_controller.gd`, `_update_mirror_hall`, `_selftest_mirror_hall` |
 
 ## Difficulty is mandatory, not optional
 Three levels: 0 easy (original data), 1 medium (default), 2 challenge. They are NOT hand-written

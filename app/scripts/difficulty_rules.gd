@@ -95,6 +95,7 @@ static func apply(src: Dictionary, d: int) -> Dictionary:
 	_apply_turning_bridge(lv, d)
 	_apply_lamp_road(lv, d)
 	_apply_mosaic(lv, d)
+	_apply_light(lv, d)
 	return lv
 
 ## Same route, harder pursuit: less lead, more gates, and narrower safe gaps.
@@ -152,6 +153,14 @@ static func _apply_mosaic(lv: Dictionary, d: int) -> void:
 	mosaic["seq_len"] = MOSAIC_SEQ_LEN[d]
 	mosaic["show_time"] = MOSAIC_SHOW_TIME[d]
 	mosaic["tile_radius"] = MOSAIC_TILE_RADIUS[d]
+
+## Same hall: one, two or three mirrors in the chain (each difficulty has its own layout in the level data).
+static func _apply_light(lv: Dictionary, d: int) -> void:
+	if not lv.has("light"):
+		return
+	var light: Dictionary = lv["light"]
+	var layouts: Array = light["layouts"]
+	light["layout"] = layouts[mini(d, layouts.size() - 1)]
 
 ## Clues that sit right on the path are easy to spot; push them off to the sides.
 static func _scatter_clues(lv: Dictionary, items: Array, d: int) -> void:
