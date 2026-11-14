@@ -1300,6 +1300,19 @@ func _run_selftest() -> void:
 			failures += await _selftest_level(i)
 	GameState.difficulty = 1
 	hud.show_main_menu()
+	await get_tree().process_frame
+	await get_tree().process_frame
+	if not hud.selftest_modal_fits():
+		print("  main menu does not fit/scroll on screen")
+		failures += 1
+	hud.close_all_modals()
+	# settings opened from the pause menu: "بازگشت" must return to the pause menu (regression)
+	hud.show_pause_menu()
+	hud.show_settings(hud.show_pause_menu)
+	hud.selftest_press_last_button()
+	if hud.modal_stack.size() != 1:
+		print("  settings back button did not return to the pause menu")
+		failures += 1
 	hud.close_all_modals()
 	hud.show_pause_menu()
 	hud.close_all_modals()

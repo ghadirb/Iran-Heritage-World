@@ -246,12 +246,46 @@ func _open_modal(min_width: float = 640.0) -> VBoxContainer:
 	panel.add_theme_stylebox_override("panel", _style(Color(0.94, 0.88, 0.74, 0.98), 18))
 	panel.custom_minimum_size = Vector2(min_width, 0)
 	center.add_child(panel)
+	# Tall modals (main menu with 12+ chapters) must scroll instead of running off the screen.
+	var scroll := ScrollContainer.new()
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	scroll.scroll_deadzone = 14   # a finger drag over a button scrolls; a tap still presses it
+	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	panel.add_child(scroll)
 	var box := VBoxContainer.new()
 	box.add_theme_constant_override("separation", 12)
-	panel.add_child(box)
+	box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll.add_child(box)
 	modal_stack.append(dim)
 	_sync_block()
+	_fit_modal.call_deferred(scroll, box)
 	return box
+
+func _fit_modal(scroll: ScrollContainer, box: VBoxContainer) -> void:
+	if not is_instance_valid(scroll) or not is_instance_valid(box):
+		return
+	var max_h := get_viewport().get_visible_rect().size.y * 0.9 - 40.0
+	scroll.custom_minimum_size.y = minf(box.get_combined_minimum_size().y, max_h)
+
+## Self-test helper: press the last button of the top modal (always "بازگشت" in settings).
+func selftest_press_last_button() -> bool:
+	if modal_stack.is_empty():
+		return false
+	var buttons: Array[Node] = modal_stack.back().find_children("*", "Button", true, false)
+	if buttons.is_empty():
+		return false
+	(buttons.back() as Button).pressed.emit()
+	return true
+
+## Self-test helper: height the top modal's scroll area may use, and whether it fits the screen.
+func selftest_modal_fits() -> bool:
+	if modal_stack.is_empty():
+		return false
+	var scrolls: Array[Node] = modal_stack.back().find_children("*", "ScrollContainer", true, false)
+	if scrolls.is_empty():
+		return false
+	var h := (scrolls[0] as ScrollContainer).custom_minimum_size.y
+	return h > 100.0 and h <= get_viewport().get_visible_rect().size.y * 0.9
 
 func close_top_modal() -> void:
 	if modal_stack.is_empty():
@@ -510,7 +544,11 @@ func show_settings(back: Callable = Callable()) -> void:
 	box.add_child(db)
 	_add_quality_controls(box)
 	box.add_child(_button("تنظیمات صدا", func() -> void: show_audio_settings(back), Vector2(380, 54)))
-	box.add_child(_button("بازگشت", func() -> void: back.call(), Vector2(380, 54)))
+	# The settings modal is still open here; the target menu (e.g. the pause menu) refuses to open on
+	# top of another modal, which made "بازگشت" do nothing. Close it first.
+	box.add_child(_button("بازگشت", func() -> void:
+		close_all_modals()
+		back.call(), Vector2(380, 54)))
 
 const LEVEL_STEPS := [0.0, 0.35, 0.7, 1.0]
 const LEVEL_NAMES := ["خاموش", "کم", "متوسط", "زیاد"]
