@@ -3,6 +3,7 @@
 Project: **Iran Heritage World** (Godot 4.4.1, GL Compatibility, Android). A 3D educational
 adventure for children based on Iranian history and myth. Branch in use: `codex/bootstrap-godot-mvp`.
 Full design rules (Persian): `documentation/game-design-rules.md`.
+**Adding anything new? First read `documentation/chapters.md`** (chapters, the content-first rule, what not to repeat).
 
 ## The one rule that defines how we build levels
 **Every new level must contain a real physical action, not only "walk up and press Interact".**
@@ -28,6 +29,19 @@ Mechanics already in the game (reuse before inventing):
 | night_courier | **stealth timing**: rotating beams from watch towers; awnings (shade) are safe and are the checkpoints; seen = back to last awning; hard adds `hard_towers` | `night_watch_controller.gd`, `_update_night_watch`, `_selftest_night_watch` |
 | frozen_lake | **sliding physics**: on ice `player.acceleration` drops (momentum); stone islands give grip and are checkpoints; thin-ice holes (never inside the lane between islands) = back to last island; jumping over holes is allowed | `ice_lake_controller.gd`, `_update_ice_lake`, `_selftest_ice_lake` |
 | sinking_stones | **timed platforms**: a stone crumbles `hold` s after the first step, returns after `down_time`; static rest pads are checkpoints; a fall = back to the last pad | `sinking_stones_controller.gd`, `_update_sinking_stones`, `_selftest_sinking_stones` |
+
+## Chapters and content-first rule (owner decision, read `documentation/chapters.md`)
+- Levels are grouped into chapters (`LevelData.CHAPTERS`, each level has `"chapter": <id>`). The menu shows chapters.
+- The purpose of the game is Iran's history, myth and culture. **Do not add levels because a mechanic is new.**
+  A new level starts from a real story/period/source (chapter brief in `documentation/chapters/<id>.md`), and its
+  physical action must be a verb of that story. Chapter `skills` (levels 8–17) is frozen.
+- Never reorder/insert levels in the middle of `LEVELS` (progress is keyed by index). Append inside a NEW chapter.
+- `_selftest_chapters()` enforces: chapters cover every level once, consecutive and in order; label + review
+  state; sources for myth/folklore/history chapters.
+- Look at what you build: `--shot` for levels and `--menu=main|<chapter index>` for the menus.
+- Voice workflow: owner uploads mp3 to `assets-source/audio/` named `<level>__<key>.mp3` / `game__<id>.mp3`;
+  convert only the new files with the settings in `tools/convert_voice.py` (match by exact name prefix, not a
+  loose substring: `game__stones_*` was once missed); do not commit `.ogg` (CI converts); regenerate the CSVs.
 
 ## Difficulty is mandatory, not optional
 Three levels: 0 easy (original data), 1 medium (default), 2 challenge. They are NOT hand-written

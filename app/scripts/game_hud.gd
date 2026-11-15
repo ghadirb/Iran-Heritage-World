@@ -610,13 +610,53 @@ func show_main_menu() -> void:
 	AudioManager.enter_menu()
 	var box := _open_modal(760)
 	box.add_child(_label("ایران؛ سفر در تاریخ و اسطوره‌ها", 32, Color(0.45, 0.25, 0.08), true, HORIZONTAL_ALIGNMENT_CENTER))
-	box.add_child(_label("فصل نخست • راز زال و سیمرغ", 18, Color(0.5, 0.35, 0.12), false, HORIZONTAL_ALIGNMENT_CENTER))
+	box.add_child(_label("یک فصل را برای ادامه‌ی سفر انتخاب کن", 18, Color(0.5, 0.35, 0.12), false, HORIZONTAL_ALIGNMENT_CENTER))
+	# One card per chapter (فصل); the levels (مرحله‌ها) of a chapter open on their own screen, so the first
+	# screen stays short however many levels the game gets.
+	for ci in range(LevelData.CHAPTERS.size()):
+		var levels := LevelData.levels_of(ci)
+		if levels.is_empty():
+			continue
+		var unlocked: bool = levels[0] <= GameState.unlocked_level
+		var star_sum := 0
+		for li in levels:
+			star_sum += int(GameState.stars.get(str(li), 0))
+		var chapter: Dictionary = LevelData.CHAPTERS[ci]
+		var caption := "%s\n%d مرحله  •  ★ %d از %d" % [str(chapter["title"]), levels.size(), star_sum, levels.size() * 3]
+		if not unlocked:
+			caption = "🔒 " + str(chapter["title"])
+		var idx := ci
+		var b := _button(caption, func() -> void: show_chapter_menu(idx), Vector2(700, 84))
+		b.disabled = not unlocked
+		box.add_child(b)
+	var cont_idx := mini(GameState.unlocked_level, LevelData.LEVELS.size() - 1)
+	box.add_child(_button("ادامه سفر", func() -> void:
+		close_all_modals()
+		start_level.emit(cont_idx), Vector2(360, 60)))
+	box.add_child(_button("تنظیمات (سختی، کیفیت، صدا، اندازه)", func() -> void: show_settings(show_main_menu), Vector2(360, 54)))
+	box.add_child(_label("این بازی روایتی ادبی و بازآفرینی تخیلی است؛ زال و سیمرغ شخصیت‌های حماسی شاهنامه‌اند، نه اشخاص تاریخیِ اثبات‌شده.", 13, Color(0.4, 0.3, 0.2)))
+
+## The levels (مرحله‌ها) of one chapter (فصل), with its content label so myth is never presented as history.
+func show_chapter_menu(chapter_idx: int) -> void:
+	close_all_modals()
+	hud_cards.visible = false
+	var chapter: Dictionary = LevelData.CHAPTERS[chapter_idx]
+	var box := _open_modal(760)
+	box.add_child(_label(str(chapter["title"]), 28, Color(0.45, 0.25, 0.08), true, HORIZONTAL_ALIGNMENT_CENTER))
+	var summary := _label(str(chapter["summary"]), 16, INK)
+	summary.custom_minimum_size = Vector2(640, 0)
+	box.add_child(summary)
+	box.add_child(_label("نوع محتوا: " + str(LevelData.CONTENT_LABELS.get(str(chapter["content_type"]), "")), 15, Color(0.5, 0.35, 0.12)))
+	if str(chapter.get("note", "")) != "":
+		var note := _label(str(chapter["note"]), 14, Color(0.4, 0.3, 0.2))
+		note.custom_minimum_size = Vector2(640, 0)
+		box.add_child(note)
 	var grid := GridContainer.new()
 	grid.columns = 2
 	grid.add_theme_constant_override("h_separation", 12)
 	grid.add_theme_constant_override("v_separation", 10)
 	box.add_child(grid)
-	for i in range(LevelData.LEVELS.size()):
+	for i in LevelData.levels_of(chapter_idx):
 		var level: Dictionary = LevelData.LEVELS[i]
 		var unlocked: bool = i <= GameState.unlocked_level
 		var star_count := int(GameState.stars.get(str(i), 0))
@@ -627,9 +667,4 @@ func show_main_menu() -> void:
 			start_level.emit(idx), Vector2(360, 56))
 		b.disabled = not unlocked
 		grid.add_child(b)
-	var cont_idx := mini(GameState.unlocked_level, LevelData.LEVELS.size() - 1)
-	box.add_child(_button("ادامه سفر", func() -> void:
-		close_all_modals()
-		start_level.emit(cont_idx), Vector2(360, 60)))
-	box.add_child(_button("تنظیمات (سختی، کیفیت، صدا، اندازه)", func() -> void: show_settings(show_main_menu), Vector2(360, 54)))
-	box.add_child(_label("این بازی روایتی ادبی و بازآفرینی تخیلی است؛ زال و سیمرغ شخصیت‌های حماسی شاهنامه‌اند، نه اشخاص تاریخیِ اثبات‌شده.", 13, Color(0.4, 0.3, 0.2)))
+	box.add_child(_button("بازگشت به فصل‌ها", show_main_menu, Vector2(360, 54)))

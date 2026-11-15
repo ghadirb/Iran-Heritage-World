@@ -3,9 +3,68 @@ extends RefCounted
 ## Data-driven definition of the playable chapters. All story text is a literary
 ## recreation (literary_myth) and must go through editorial review before release.
 
+## A *chapter* (فصل) groups consecutive *levels* (مرحله). Levels carry `"chapter": <id>`; the levels of one
+## chapter must be next to each other in LEVELS and chapters must appear here in the same order (the selftest
+## checks this). Saved progress is keyed by LEVELS index, so NEVER reorder or insert levels in the middle:
+## append new levels at the end, inside a new chapter. See documentation/chapters.md before adding one.
+## `review`: draft | needs_editorial_review | verified | published (see documentation/historical-integrity.md).
+## Chapters whose content_type is documented_history / literary_myth / mythology / folklore must list `sources`.
+const REVIEW_STATES := ["draft", "needs_editorial_review", "verified", "published"]
+const SOURCE_REQUIRED := ["documented_history", "literary_myth", "mythology", "folklore"]
+const CONTENT_LABELS := {
+	"documented_history": "تاریخ مستند",
+	"literary_myth": "روایت ادبی و حماسی",
+	"mythology": "اسطوره",
+	"folklore": "افسانه و روایت عامیانه",
+	"creative_reconstruction": "بازآفرینی تخیلی برای بازی",
+}
+const CHAPTERS: Array[Dictionary] = [
+	{
+		"id": "zal_simorgh",
+		"title": "فصل ۱ • راز زال و سیمرغ",
+		"summary": "داستان زال، سیمرغ و بازگشت زال به خانواده‌اش، به‌صورت روایتی ادبی از شاهنامه.",
+		"content_type": "literary_myth",
+		"note": "مرحله‌های «بازگشت به دشت» تا «دروازه‌ی تعادل» بازآفرینی تخیلی بازی‌اند.",
+		"review": "needs_editorial_review",
+		"sources": ["شاهنامه‌ی فردوسی، داستان زال و سیمرغ (ویراست، بخش و بیت‌های دقیق باید توسط بازبین انسانی ثبت شود)"],
+	},
+	{
+		"id": "arash",
+		"title": "فصل ۲ • آرش کمانگیر",
+		"summary": "روایت آرش کمانگیر و تیری که مرز را نشان داد.",
+		"content_type": "folklore",
+		"review": "needs_editorial_review",
+		"sources": ["روایت آرش کمانگیر (منبع دقیق، ازجمله اوستا و متون بعدی، باید توسط بازبین انسانی تأیید و با ارجاع ثبت شود)"],
+	},
+	{
+		"id": "skills",
+		"title": "فصل ۳ • گذرگاه‌های ایران (تمرین مهارت)",
+		"summary": "مرحله‌های مهارتی با پوشش ایرانی. هنوز به رویداد یا دوره‌ی مشخصی گره نخورده‌اند و بازآفرینی تخیلی‌اند؛ مراحل تازه به این فصل اضافه نمی‌شوند.",
+		"content_type": "creative_reconstruction",
+		"review": "draft",
+		"sources": [],
+	},
+]
+
+static func chapter_index(chapter_id: String) -> int:
+	for i in range(CHAPTERS.size()):
+		if str(CHAPTERS[i]["id"]) == chapter_id:
+			return i
+	return -1
+
+## Level indices (positions in LEVELS) that belong to the chapter at `chapter_idx`.
+static func levels_of(chapter_idx: int) -> Array[int]:
+	var out: Array[int] = []
+	var cid := str(CHAPTERS[chapter_idx]["id"])
+	for i in range(LEVELS.size()):
+		if str(LEVELS[i].get("chapter", "")) == cid:
+			out.append(i)
+	return out
+
 const LEVELS: Array[Dictionary] = [
 	{
 		"id": "alborz_foothills",
+		"chapter": "zal_simorgh",
 		"audio": {"music": 0.55, "wind": 0.30, "water": 1.0},
 		"title": "دامنه البرز",
 		"subtitle": "مرحله ۱ • ردّ آشیانه",
@@ -29,6 +88,7 @@ const LEVELS: Array[Dictionary] = [
 	},
 	{
 		"id": "stone_pass",
+		"chapter": "zal_simorgh",
 		"audio": {"music": 0.45, "wind": 0.70, "water": 0.0},
 		"title": "گذرگاه سنگی",
 		"subtitle": "مرحله ۲ • صعود به آشیانه",
@@ -59,6 +119,7 @@ const LEVELS: Array[Dictionary] = [
 	},
 	{
 		"id": "simorgh_nest",
+		"chapter": "zal_simorgh",
 		"audio": {"music": 0.60, "wind": 0.85, "water": 0.0},
 		"title": "آشیانه سیمرغ",
 		"subtitle": "مرحله ۳ • آتش‌های نشان‌دار",
@@ -97,6 +158,7 @@ const LEVELS: Array[Dictionary] = [
 	},
 	{
 		"id": "return_to_plain",
+		"chapter": "zal_simorgh",
 		"audio": {"music": 0.50, "wind": 0.30, "water": 0.9},
 		"title": "بازگشت به دشت",
 		"subtitle": "مرحله ۴ • درفش‌های کاروان",
@@ -129,6 +191,7 @@ const LEVELS: Array[Dictionary] = [
 	},
 	{
 		"id": "hall_of_questions",
+		"chapter": "zal_simorgh",
 		"audio": {"music": 0.70, "wind": 0.05, "water": 0.0},
 		"title": "تالار پرسش‌ها",
 		"subtitle": "مرحله ۵ • آزمون دانش",
@@ -163,6 +226,7 @@ const LEVELS: Array[Dictionary] = [
 	},
 	{
 		"id": "balance_gate",
+		"chapter": "zal_simorgh",
 		"audio": {"music": 0.55, "wind": 0.14, "water": 0.0},
 		"title": "دروازه‌ی تعادل",
 		"subtitle": "مرحله ۶ • معمای وزن‌ها",
@@ -189,6 +253,7 @@ const LEVELS: Array[Dictionary] = [
 	},
 	{
 		"id": "archers_field",
+		"chapter": "arash",
 		"audio": {"music": 0.5, "wind": 0.22, "water": 0.0},
 		"title": "دشت کمانگیر",
 		"subtitle": "مرحله ۷ • تیراندازی",
@@ -214,6 +279,7 @@ const LEVELS: Array[Dictionary] = [
 	},
 	{
 		"id": "misty_escape",
+		"chapter": "skills",
 		"audio": {"music": 0.42, "wind": 0.48, "water": 0.0},
 		"title": "گریز از مه",
 		"subtitle": "مرحله ۸ • راهِ پناهگاه",
@@ -241,6 +307,7 @@ const LEVELS: Array[Dictionary] = [
 	},
 	{
 		"id": "wind_path",
+		"chapter": "skills",
 		"audio": {"music": 0.46, "wind": 0.78, "water": 0.0},
 		"title": "راهِ باد",
 		"subtitle": "مرحله ۹ • گذرِ زمان‌دار",
@@ -268,6 +335,7 @@ const LEVELS: Array[Dictionary] = [
 	},
 	{
 		"id": "clay_waterway",
+		"chapter": "skills",
 		"audio": {"music": 0.44, "wind": 0.22, "water": 0.72},
 		"title": "گویِ راه‌آب",
 		"subtitle": "مرحله ۱۰ • هدایتِ گوی",
@@ -294,6 +362,7 @@ const LEVELS: Array[Dictionary] = [
 	},
 	{
 		"id": "turning_bridge",
+		"chapter": "skills",
 		"audio": {"music": 0.48, "wind": 0.52, "water": 0.28},
 		"title": "پلِ چرخان",
 		"subtitle": "مرحله ۱۱ • راهِ تعادل",
@@ -322,6 +391,7 @@ const LEVELS: Array[Dictionary] = [
 	},
 	{
 		"id": "caravan_lamp",
+		"chapter": "skills",
 		"audio": {"music": 0.5, "wind": 0.3, "water": 0.1},
 		"title": "چراغِ کاروان",
 		"subtitle": "مرحله ۱۲ • گامِ آرام",
@@ -348,6 +418,7 @@ const LEVELS: Array[Dictionary] = [
 	},
 	{
 		"id": "mosaic_court",
+		"chapter": "skills",
 		"audio": {"music": 0.55, "wind": 0.2, "water": 0.1},
 		"title": "حیاطِ کاشی",
 		"subtitle": "مرحله ۱۳ • حافظه و گام",
@@ -374,6 +445,7 @@ const LEVELS: Array[Dictionary] = [
 	},
 	{
 		"id": "mirror_hall",
+		"chapter": "skills",
 		"audio": {"music": 0.55, "wind": 0.15, "water": 0.1},
 		"title": "تالارِ آینه‌کاری",
 		"subtitle": "مرحله ۱۴ • نور و چرخش",
@@ -402,6 +474,7 @@ const LEVELS: Array[Dictionary] = [
 	},
 	{
 		"id": "night_courier",
+		"chapter": "skills",
 		"audio": {"music": 0.45, "wind": 0.25, "water": 0.05},
 		"title": "پیکِ شب",
 		"subtitle": "مرحله ۱۵ • پنهان از نور",
@@ -431,6 +504,7 @@ const LEVELS: Array[Dictionary] = [
 	},
 	{
 		"id": "frozen_lake",
+		"chapter": "skills",
 		"audio": {"music": 0.45, "wind": 0.35, "water": 0.0},
 		"title": "دریاچه‌ی یخ‌زده",
 		"subtitle": "مرحله ۱۶ • لغزیدن روی یخ",
@@ -459,6 +533,7 @@ const LEVELS: Array[Dictionary] = [
 	},
 	{
 		"id": "sinking_stones",
+		"chapter": "skills",
 		"audio": {"music": 0.5, "wind": 0.3, "water": 0.6},
 		"title": "سنگ‌های رود",
 		"subtitle": "مرحله ۱۷ • سنگ‌های لرزان",

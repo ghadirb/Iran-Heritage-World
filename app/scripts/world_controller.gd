@@ -116,8 +116,21 @@ func _arg_value(key: String) -> String:
 			return a.substr(key.length() + 1)
 	return ""
 
-## Developer helper: godot --path app -- --shot=out.png --level=0 --z=-20 --yaw=0.4 [--shoot=<physics frames after firing>] [--fires=<lit braziers>]
+## Developer helper (also --menu=main|<chapter index> for the menus): godot --path app -- --shot=out.png --level=0 --z=-20 --yaw=0.4 [--shoot=<physics frames after firing>] [--fires=<lit braziers>]
 func _run_screenshot(path: String) -> void:
+	if _arg_value("--menu") != "":
+		# dev helper: --menu=main or --menu=<chapter index>; unlocks everything in memory only (nothing is saved)
+		GameState.unlocked_level = LevelData.LEVELS.size() - 1
+		if _arg_value("--menu") == "main":
+			hud.show_main_menu()
+		else:
+			hud.show_chapter_menu(int(_arg_value("--menu")))
+		for _i in range(30):
+			await get_tree().process_frame
+		get_viewport().get_texture().get_image().save_png(path)
+		print("saved ", path)
+		get_tree().quit()
+		return
 	var lv := int(_arg_value("--level")) if _arg_value("--level") != "" else 0
 	load_level(lv, false)
 	hud.close_all_modals()
@@ -1464,6 +1477,7 @@ func _report_missing_voice() -> void:
 func _run_selftest() -> void:
 	var failures := 0
 	_report_missing_voice()
+	failures += _selftest_chapters()
 	# developer filters: --only=<level index>  --diff=<0..2>
 	var only := int(_arg_value("--only")) if _arg_value("--only") != "" else -1
 	var only_diff := int(_arg_value("--diff")) if _arg_value("--diff") != "" else -1
@@ -1483,6 +1497,19 @@ func _run_selftest() -> void:
 		print("  main menu does not fit/scroll on screen")
 		failures += 1
 	hud.close_all_modals()
+	# chapter screen: every chapter opens, fits/scrolls, and "بازگشت" returns to the chapter list
+	for ci in range(LevelData.CHAPTERS.size()):
+		hud.show_chapter_menu(ci)
+		await get_tree().process_frame
+		await get_tree().process_frame
+		if not hud.selftest_modal_fits():
+			print("  chapter screen %d does not fit/scroll on screen" % ci)
+			failures += 1
+		hud.selftest_press_last_button()
+		if hud.modal_stack.size() != 1:
+			print("  chapter screen %d: back button did not return to the chapter list" % ci)
+			failures += 1
+		hud.close_all_modals()
 	# settings opened from the pause menu: "بازگشت" must return to the pause menu (regression)
 	hud.show_pause_menu()
 	hud.show_settings(hud.show_pause_menu)
@@ -1497,6 +1524,42 @@ func _run_selftest() -> void:
 	hud.close_all_modals()
 	print("SELFTEST ", "OK" if failures == 0 else "FAILED (%d)" % failures)
 	get_tree().quit(0 if failures == 0 else 1)
+
+## Chapters (فصل) must cover every level exactly once, in order and next to each other (saved progress is
+## keyed by level index), carry a content label and review state, and list sources when they tell myth or history.
+func _selftest_chapters() -> int:
+	var bad := 0
+	var ids := {}
+	var covered := 0
+	var last_end := -1
+	for ci in range(LevelData.CHAPTERS.size()):
+		var c: Dictionary = LevelData.CHAPTERS[ci]
+		var cid := str(c.get("id", ""))
+		if cid == "" or ids.has(cid):
+			bad += 1
+		ids[cid] = true
+		for key in ["title", "summary", "content_type", "review"]:
+			if str(c.get(key, "")) == "":
+				bad += 1
+		if not LevelData.REVIEW_STATES.has(str(c.get("review", ""))) or not LevelData.CONTENT_LABELS.has(str(c.get("content_type", ""))):
+			bad += 1
+		if LevelData.SOURCE_REQUIRED.has(str(c.get("content_type", ""))) and (c.get("sources", []) as Array).is_empty():
+			bad += 1
+		var lv := LevelData.levels_of(ci)
+		if lv.is_empty():
+			bad += 1
+		else:
+			if lv[0] != last_end + 1 or lv[lv.size() - 1] - lv[0] + 1 != lv.size():
+				bad += 1
+			last_end = lv[lv.size() - 1]
+		covered += lv.size()
+	if covered != LevelData.LEVELS.size():
+		bad += 1
+	for lvl in LevelData.LEVELS:
+		if LevelData.chapter_index(str(lvl.get("chapter", ""))) < 0:
+			bad += 1
+	print("  chapters: %d chapters cover %d levels, problems=%d" % [LevelData.CHAPTERS.size(), covered, bad])
+	return 1 if bad > 0 else 0
 
 func _selftest_level(i: int) -> int:
 	var failures := 0

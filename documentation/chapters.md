@@ -1,0 +1,72 @@
+# Chapters (فصل) and how to continue the game — READ BEFORE ADDING ANYTHING
+
+Terms: **level = مرحله** (one playable 3D course, an entry in `LevelData.LEVELS`),
+**chapter = فصل** (a group of consecutive levels that tell ONE story, an entry in `LevelData.CHAPTERS`).
+The main menu shows chapters; a chapter opens its own level screen (`show_chapter_menu`).
+The first screen therefore stays short however many levels exist.
+
+## Where the project stands (honest status)
+| Chapter | Levels | Content | Status |
+|---|---|---|---|
+| `zal_simorgh` فصل ۱ | 1–6 | Zal and the Simorgh (Shahnameh). Levels 1–3 are the story; 4–6 are game reconstructions around it | needs editorial review, exact edition/lines still to be recorded |
+| `arash` فصل ۲ | 7 | Arash the archer (folklore) — a single level | needs editorial review, sources to be recorded |
+| `skills` فصل ۳ | 8–17 | Ten **skill levels** with an Iranian look (wind, water, bridge, caravan lamp, mosaic, mirrors, night courier, ice, river stones). They were built to try mechanics; they are NOT tied to a specific event or period | **frozen** — do not add levels here |
+
+Mistake we made and must not repeat: after chapter 7 we kept inventing new *mechanics* (13–17) without a story,
+period or source behind them. The game drifted from its purpose (Iran, its history and myths).
+**From now on the content decides the level, not the other way round.**
+
+## Content-first rule (mandatory)
+1. A new chapter starts from a **real story, period or place** (a Shahnameh episode, a documented historical
+   event, a monument, a custom with known sources). Not from a mechanic.
+2. Write the chapter brief (template below) BEFORE any code and put it in `documentation/chapters/<id>.md`.
+3. Every level's *action* must be a verb of that story (Kaveh forges / raises the banner, Arash shoots, the
+   courier rides ...). If the action has no link to the story, the level does not belong in the chapter.
+4. Reuse existing mechanics (table in `AGENTS.md`) before writing a new one. A new mechanic is allowed only when
+   no existing one fits the story beat, and it still needs difficulty knobs and a selftest bot.
+5. Myth, folklore and literature are labelled as such (`content_type`); history needs a cited source.
+   Never present a myth as history, and never invent a historical claim. When sources disagree, say so or leave
+   the detail out (e.g. the number of Kaveh's sons differs between retellings — do not state a number).
+6. Knowledge entries (دانشنامه) are short, factual, sourced in the chapter brief, and mark what is a game
+   reconstruction. AI-written text is `draft` until a human reviewer sets `verified` (see `historical-integrity.md`).
+7. Do not add levels to the frozen `skills` chapter. Never reorder or insert levels in the middle of
+   `LEVELS` (saved progress is keyed by index): append at the end, inside a NEW chapter.
+
+## Chapter brief template (`documentation/chapters/<id>.md`)
+```
+# <Persian title> (<id>)
+- content_type: literary_myth | mythology | folklore | documented_history | creative_reconstruction
+- review: draft | needs_editorial_review | verified | published
+- What the child should learn (2-3 sentences, Persian)
+- Sources: author/work, edition, section/lines/page, access date (a human must be able to check each claim)
+- Story beats -> levels: one row per level: beat | what the player physically does | mechanic reused | difficulty knobs
+- What is invented for the game (must be labelled "بازآفرینی تخیلی")
+- Knowledge entries and quiz questions (each with its source)
+- Open questions for the human reviewer
+```
+
+## Steps to add a chapter
+1. Brief (above) and owner/reviewer agreement on the story beats.
+2. Add the chapter to `LevelData.CHAPTERS` (`sources` is required for myth/folklore/history; selftest enforces it).
+3. Append its levels at the END of `LEVELS`, each with `"chapter": "<id>"` (copy the nearest level, follow the
+   checklist in `AGENTS.md`). Chapter levels must be consecutive and in the same order as `CHAPTERS`.
+4. Difficulty knobs, selftest bot, `--jumptest` when reachability changes, voice script export (see `AGENTS.md`).
+5. **Look at it**: take a screenshot (`--shot`, see `AGENTS.md`) of every new level and of the menu
+   (`--menu=main` / `--menu=<chapter index>`). Logic tests alone missed visual bugs before (mirror beams drawn as slabs).
+6. Update README, `roadmap.md`, `game-design-rules.md`; commit with symptom + root cause.
+7. The owner records the new voice lines (`documentation/voice-missing.csv`); convert only the new mp3 files
+   (CI converts everything; do not commit `.ogg` of later chapters).
+
+## Chapter queue (proposals — each needs its brief, sources and owner approval first)
+Sources named below are starting points to verify, not citations.
+1. **Kaveh and Zahhak** (Shahnameh) — Zahhak's tyranny, Kaveh refuses and raises his leather apron on a spear
+   (the Kaviani banner), Fereydun takes the throne, Zahhak is bound on Mount Damavand rather than killed.
+   Natural verbs: forge/hammer rhythm, carry and raise the banner, climb Damavand, bind (not kill) the tyrant.
+   Detail to keep vague: the number of Kaveh's sons (retellings differ). Label what the game invents.
+2. **Jamshid and Nowruz** (Shahnameh / Nowruz tradition) — separate the mythic origin story from the documented
+   customs of Nowruz; a good place to teach the `literary_myth` vs `documented_history` difference.
+3. **Cyrus and the Achaemenids** (documented history) — needs primary/secondary sources (e.g. the Cyrus Cylinder
+   as an object in the British Museum, Herodotus) and careful reviewer-approved wording.
+4. **Persepolis / the Royal Road and couriers** (documented history) — would give the frozen `night_courier`
+   idea a real basis (Herodotus on Persian couriers); rebuild it as part of this chapter, not as a loose level.
+5. **Rostam's journey** (Shahnameh) — adventure beats suit many existing mechanics (rolling, bridges, archery).
