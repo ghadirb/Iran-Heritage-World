@@ -68,8 +68,8 @@ func build(parent: Node3D, terrain_builder: TerrainBuilder, level: Dictionary) -
 	_build_lantern()
 	for _i in range(mirrors.size() + 1):
 		var b := MeshInstance3D.new()
-		b.mesh = PropFactory.cylinder(0.07, 0.07, 1.0, 8)
-		b.material_override = PropFactory.beam_material()
+		b.mesh = PropFactory.cylinder(0.09, 0.09, 1.0, 8)
+		b.material_override = _beam_material()
 		b.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		root.add_child(b)
 		beam_nodes.append(b)
@@ -238,7 +238,9 @@ func _refresh() -> void:
 			b.visible = true
 			var dir3 := (to3 - from3).normalized()
 			var basis := Basis.looking_at(dir3, Vector3.UP) * Basis(Vector3.RIGHT, PI / 2.0)
-			b.transform = Transform3D(basis.scaled(Vector3(1.0, len, 1.0)), (from3 + to3) * 0.5)
+			# stretch along the beam's OWN axis (basis * scale). Basis.scaled() works in world space and turned the
+			# beams into tall vertical slabs instead of horizontal rays.
+			b.transform = Transform3D(basis * Basis.from_scale(Vector3(1.0, len, 1.0)), (from3 + to3) * 0.5)
 		else:
 			b.visible = false
 	if is_instance_valid(lantern_mat):
@@ -247,6 +249,35 @@ func _refresh() -> void:
 		lantern_mat.emission = Color("#ffd98a")
 		lantern_mat.emission_energy_multiplier = 4.0 if hit else 0.3
 
+## Bright, unshaded and opaque enough to read against a pale daytime sky.
+func _beam_material() -> StandardMaterial3D:
+	var m := StandardMaterial3D.new()
+	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	m.albedo_color = Color(1.0, 0.82, 0.25, 0.92)
+	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	return m
+
+## Self-test helper: every drawn beam must lie flat along its segment (axis horizontal, length = segment length).
+func beams_ok() -> bool:
+	var res := trace(source, source_angle, _current_mirrors(), target, target_radius, mirror_half)
+	var pts: Array = res["points"]
+	var shown := 0
+	for i in range(beam_nodes.size()):
+		var b := beam_nodes[i]
+		if not b.visible:
+			continue
+		shown += 1
+		var axis := b.transform.basis.y
+		var a2: Vector2 = pts[i]
+		var b2: Vector2 = pts[i + 1]
+		var seg := a2.distance_to(b2)
+		if absf(axis.y) > 0.02 or absf(axis.length() - seg) > 0.05:
+			return false
+		var want := Vector3(b2.x - a2.x, 0.0, b2.y - a2.y).normalized()
+		if absf(axis.normalized().dot(want)) < 0.999:
+			return false
+	return shown > 0
+
 func _build_mirror(i: int, entry: Dictionary) -> Node3D:
 	var p: Vector2 = entry["pos"]
 	var y := terrain.height(p.x, p.y)
@@ -254,7 +285,7 @@ func _build_mirror(i: int, entry: Dictionary) -> Node3D:
 	n.name = "Mirror%d" % i
 	n.position = Vector3(p.x, y, p.y)
 	var frame := PropFactory.mat(Color("#8a6a3a"), 0.6)
-	var glass := PropFactory.mat(Color("#dfe9f2"), 0.15, 0.9, 0.7)
+	var glass := PropFactory.mat(Color("#cfe4f2"), 0.05, 0.3, 0.35)
 	var w := mirror_half * 2.0
 	n.add_child(PropFactory.part(PropFactory.box(Vector3(w + 0.2, 1.8, 0.16)), frame, Vector3(0, 1.1, 0)))
 	n.add_child(PropFactory.part(PropFactory.box(Vector3(w, 1.6, 0.2)), glass, Vector3(0, 1.1, 0)))

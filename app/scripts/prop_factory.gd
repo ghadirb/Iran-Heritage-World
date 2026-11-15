@@ -201,54 +201,101 @@ static func make_pedestal(book_color: Color = Color("#f0b040")) -> Node3D:
 	root.add_child(tome)
 	return root
 
+## A stone brazier whose colour can be read from far away, lit or not: a coloured pennant on a pole, a coloured
+## ground ring and a saturated coal bed in the bowl (the old small pale gem washed out to white in daylight).
 static func make_brazier(color: Color) -> Node3D:
 	var root := Node3D.new()
 	var stone := mat(Color("#5b5348"), 0.8)
 	root.add_child(part(cylinder(0.45, 0.65, 0.35), stone, Vector3(0, 0.18, 0)))
 	root.add_child(part(cylinder(0.2, 0.28, 1.0), stone, Vector3(0, 0.8, 0)))
 	root.add_child(part(cylinder(0.6, 0.28, 0.35), stone, Vector3(0, 1.45, 0)))
-	var gem := part(sphere(0.2, 10), mat(color, 0.2, 0.0, 2.2), Vector3(0, 1.8, 0), Vector3(1, 1.3, 1))
-	gem.name = "Gem"
-	root.add_child(gem)
+	# coal bed: saturated colour, only a little emission so it does not turn white under a bright sky
+	var coals := part(cylinder(0.5, 0.5, 0.1), mat(color, 0.6, 0.0, 0.7), Vector3(0, 1.58, 0))
+	coals.name = "Gem"
+	root.add_child(coals)
+	# coloured pennant on a pole next to the bowl
+	root.add_child(part(cylinder(0.04, 0.05, 3.0), mat(Color("#3d342a"), 0.9), Vector3(0.75, 1.5, 0)))
+	var flag := part(box(Vector3(0.08, 0.55, 0.9)), mat(color, 0.7, 0.0, 0.35), Vector3(0.75, 2.75, 0.5))
+	flag.name = "Pennant"
+	root.add_child(flag)
+	# coloured ground ring
+	var ring := part(TorusMesh.new(), mat(color, 0.6, 0.0, 0.5), Vector3(0, 0.06, 0))
+	(ring.mesh as TorusMesh).inner_radius = 1.0
+	(ring.mesh as TorusMesh).outer_radius = 1.25
+	ring.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	root.add_child(ring)
 	return root
 
+## Saturated, readable fire: layered flame tongues (outer colour, lighter middle, pale core) plus rising
+## sparks, drawn with normal alpha blending so a blue fire stays blue and a green fire stays green.
 static func make_flame(color: Color) -> Node3D:
 	var root := Node3D.new()
 	root.name = "Flame"
+	var outer := _flame_tongue(color, 0.5, 1.5, 0.9, Vector3(0, 2.4, 0))
+	var middle := _flame_tongue(color.lerp(Color.WHITE, 0.35), 0.34, 1.1, 0.95, Vector3(0, 2.2, 0))
+	var core := _flame_tongue(color.lerp(Color.WHITE, 0.7), 0.18, 0.7, 1.0, Vector3(0, 2.0, 0))
+	root.add_child(outer)
+	root.add_child(middle)
+	root.add_child(core)
 	var p := CPUParticles3D.new()
-	p.amount = 28
-	p.lifetime = 0.9
+	p.amount = 18
+	p.lifetime = 1.1
 	p.direction = Vector3.UP
-	p.spread = 14.0
+	p.spread = 18.0
 	p.initial_velocity_min = 0.8
-	p.initial_velocity_max = 1.6
-	p.gravity = Vector3(0, 0.6, 0)
+	p.initial_velocity_max = 1.8
+	p.gravity = Vector3(0, 0.5, 0)
 	p.scale_amount_min = 0.5
 	p.scale_amount_max = 1.0
 	var qm := QuadMesh.new()
-	qm.size = Vector2(0.38, 0.38)
+	qm.size = Vector2(0.16, 0.16)
 	var fm := StandardMaterial3D.new()
 	fm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	fm.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
-	fm.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
 	fm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	fm.vertex_color_use_as_albedo = true
-	fm.albedo_color = color
+	fm.albedo_color = color.lerp(Color.WHITE, 0.25)
 	p.mesh = qm
 	p.material_override = fm
-	var curve := Curve.new()
-	curve.add_point(Vector2(0, 1))
-	curve.add_point(Vector2(1, 0))
-	p.scale_amount_curve = curve
-	p.position = Vector3(0, 1.75, 0)
+	var ramp := Gradient.new()
+	ramp.set_color(0, Color(1, 1, 1, 1.0))
+	ramp.set_color(1, Color(1, 1, 1, 0.0))
+	p.color_ramp = ramp
+	p.position = Vector3(0, 1.95, 0)
 	root.add_child(p)
 	var light := OmniLight3D.new()
 	light.light_color = color
-	light.light_energy = 1.6
+	light.light_energy = 2.0
 	light.omni_range = 9.0
 	light.position = Vector3(0, 2.3, 0)
 	root.add_child(light)
+	# gentle flicker of the layers
+	root.tree_entered.connect(func() -> void:
+		for layer in [outer, middle, core]:
+			var tw := root.create_tween().set_loops()
+			var k := 1.0 + 0.08 * float(root.get_child_count() % 3)
+			tw.tween_property(layer, "scale", Vector3(1.0, 1.16, 1.0) * k, 0.18 + 0.05 * randf())
+			tw.tween_property(layer, "scale", Vector3(1.0, 0.9, 1.0), 0.22 + 0.05 * randf()))
 	return root
+
+static func _flame_tongue(color: Color, radius: float, height: float, alpha: float, pos: Vector3) -> MeshInstance3D:
+	var m := StandardMaterial3D.new()
+	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	m.albedo_color = Color(color.r, color.g, color.b, alpha)
+	# a cone (wide at the bowl, pointed at the tip) reads as a flame, a sphere reads as a ball
+	var mesh := CylinderMesh.new()
+	mesh.top_radius = 0.03
+	mesh.bottom_radius = radius
+	mesh.height = height
+	mesh.radial_segments = 14
+	mesh.rings = 1
+	var mi := MeshInstance3D.new()
+	mi.mesh = mesh
+	mi.material_override = m
+	mi.position = pos
+	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	return mi
 
 # ---------- collectibles ----------
 

@@ -102,3 +102,8 @@ Developer helper to look at a chapter without a phone (needs `xvfb-run` and mesa
 three difficulty knobs stay in `DifficultyRules`. Every new mechanic
 needs a headless bot/test in `--selftest` (see `_selftest_bridge`, `_selftest_logs`) and a `--jumptest`-style check
 when it affects reachability.
+
+## Pitfalls found by looking at real screenshots
+- `Basis.scaled()` scales in WORLD space; to stretch a mesh along its own axis use `basis * Basis.from_scale(...)` (the mirror beams were tall vertical slabs because of this).
+- Additive-blended or strongly emissive colours turn white against the bright daytime sky; use alpha blending and saturated albedo so colour puzzles (fire order) stay readable.
+- `--fires=N` lights the first N braziers in `--shot` screenshots.

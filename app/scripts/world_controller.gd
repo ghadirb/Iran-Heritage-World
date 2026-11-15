@@ -116,7 +116,7 @@ func _arg_value(key: String) -> String:
 			return a.substr(key.length() + 1)
 	return ""
 
-## Developer helper: godot --path app -- --shot=out.png --level=0 --z=-20 --yaw=0.4 [--shoot=<physics frames after firing>]
+## Developer helper: godot --path app -- --shot=out.png --level=0 --z=-20 --yaw=0.4 [--shoot=<physics frames after firing>] [--fires=<lit braziers>]
 func _run_screenshot(path: String) -> void:
 	var lv := int(_arg_value("--level")) if _arg_value("--level") != "" else 0
 	load_level(lv, false)
@@ -129,6 +129,12 @@ func _run_screenshot(path: String) -> void:
 		player.yaw = float(_arg_value("--yaw"))
 	if _arg_value("--pitch") != "":
 		player.pitch = float(_arg_value("--pitch"))
+	if _arg_value("--fires") != "":
+		# dev helper: show the first N braziers lit
+		for it in items:
+			var bd: Dictionary = it["data"]
+			if str(bd["kind"]) == "brazier" and int(bd["order"]) < int(_arg_value("--fires")):
+				(it["node"] as Node3D).add_child(PropFactory.make_flame(Color(str(bd["color"]))))
 	hud.toast("آزمایش نمایش متن فارسی و رابط کاربری", 60.0)
 	for _i in range(90):
 		await get_tree().process_frame
@@ -2146,6 +2152,9 @@ func _selftest_night_watch() -> int:
 	return bad
 
 func _selftest_mirror_hall() -> int:
+	if mirror_hall != null and not mirror_hall.beams_ok():
+		print("  mirror hall: beams are not drawn flat along their segments")
+		return 1
 	var hall := mirror_hall
 	if hall == null:
 		print("  mirror_hall: controller missing")
