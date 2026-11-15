@@ -52,7 +52,8 @@ func build(parent: Node3D, terrain_builder: TerrainBuilder, level: Dictionary) -
 			_build_tile(Vector3(x, _deck(z), z))
 	for pz in pad_z:
 		_build_pad(float(pz))
-	_build_water(z0, z1)
+	if bool(data.get("water", true)):   # a mountain gorge (Damavand) has no river at its bottom
+		_build_water(z0, z1)
 
 func reset() -> void:
 	active = true

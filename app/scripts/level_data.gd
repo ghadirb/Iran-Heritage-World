@@ -615,7 +615,7 @@ const LEVELS: Array[Dictionary] = [
 		"flat_z": -55.0, "lane_clear": 18.0, "kill_y": -12.0,
 		"chasm": {"z0": -18.0, "z1": -90.0, "depth": 20.0, "edge": 1.5},
 		"sinking_stones": {"radius": 1.5, "spacing": 3.4, "hold": 1.0, "down_time": 3.0, "finish_z": -95.0,
-			"pads": [-46.0, -68.0], "chasm": {"z0": -18.0, "z1": -90.0}},
+			"pads": [-46.0, -68.0], "chasm": {"z0": -18.0, "z1": -90.0}, "water": false},
 		"stones_start_msg": "summit_start", "stones_safe_msg": "summit_safe",
 		"grass": "#7a7d68", "grass2": "#9a9a80", "rock": "#706a66", "path": "#9c8c74", "snow": "#f1f4f8", "snow_line": 30.0,
 		"sky_top": "#4a6fa5", "sky_horizon": "#e6d5bd", "fog": "#bfc9d2", "fog_density": 0.008,
