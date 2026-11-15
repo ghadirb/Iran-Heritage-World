@@ -114,7 +114,7 @@ static func all_lines() -> Array:
 			var v: Dictionary = DifficultyRules.apply(level, diff)
 			var tag := " (سختی %s)" % DifficultyRules.NAMES[diff]
 			_option_rows(rows, seen, lid, v["interactables"], tag)
-			if v.has("order_hint"):
+			if v.has("order_hint") and not bool(v.get("no_fire_riddle", false)):
 				_row(rows, seen, lid, "order_wrong_d%d" % diff, "پیام کوتاه بازی (ترتیب آتش‌ها اشتباه بود)" + tag, "راوی", GameMessages.wrong_order(v), 2, false)
 	_message_rows(rows, seen)
 	return rows

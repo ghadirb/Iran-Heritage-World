@@ -11,6 +11,7 @@ The first screen therefore stays short however many levels exist.
 | `zal_simorgh` فصل ۱ | 1–6 | Zal and the Simorgh (Shahnameh). Levels 1–3 are the story; 4–6 are game reconstructions around it | needs editorial review, exact edition/lines still to be recorded |
 | `arash` فصل ۲ | 7 | Arash the archer (folklore) — a single level | needs editorial review, sources to be recorded |
 | `skills` فصل ۳ | 8–17 | Ten **skill levels** with an Iranian look (wind, water, bridge, caravan lamp, mosaic, mirrors, night courier, ice, river stones). They were built to try mechanics; they are NOT tied to a specific event or period | **frozen** — do not add levels here |
+| `kaveh_zahhak` فصل ۴ | 18–20 | Kaveh the blacksmith and Zahhak (Shahnameh) — first chapter built content-first; brief in `documentation/chapters/kaveh_zahhak.md` | needs editorial review, primary-source lines still to be recorded |
 
 Mistake we made and must not repeat: after chapter 7 we kept inventing new *mechanics* (13–17) without a story,
 period or source behind them. The game drifted from its purpose (Iran, its history and myths).

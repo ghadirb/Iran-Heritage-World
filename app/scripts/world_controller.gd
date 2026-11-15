@@ -792,12 +792,12 @@ func _update_sinking_stones(delta: float) -> void:
 		return
 	if not stones_msg_shown and player.global_position.z < float((level["chasm"] as Dictionary)["z0"]) + 6.0:
 		stones_msg_shown = true
-		_msg("stones_start", 5.0)
+		_msg(str(level.get("stones_start_msg", "stones_start")), 5.0)
 	if sinking_stones.step(delta, player.global_position, player.is_on_floor()) == "crossed":
 		for it in items:
 			if str((it["data"] as Dictionary)["kind"]) == "stones_finish" and not bool(it["done"]):
 				_mark_done(it)
-		_msg("stones_safe", 3.5)
+		_msg(str(level.get("stones_safe_msg", "stones_safe")), 3.5)
 		_check_finish()
 
 # ---------- ice lake (chapter 16): slide across the ice, stone islands give grip ----------
@@ -2476,7 +2476,10 @@ func _selftest_difficulty_sanity() -> int:
 		if str((it["data"] as Dictionary)["kind"]) == "brazier":
 			orders.append(int((it["data"] as Dictionary)["order"]))
 	orders.sort()
-	if not orders.is_empty() and orders != [0, 1, 2, 3]:
+	var expected_orders := []
+	for k in range(orders.size()):
+		expected_orders.append(k)
+	if orders != expected_orders:   # fires are numbered 0..n-1 (the Simorgh nest has four, the forge three)
 		bad += 1
 	return bad
 

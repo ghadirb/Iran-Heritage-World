@@ -292,6 +292,8 @@ static func _pick_moving_stones(ch: Dictionary, items: Array, d: int, count: int
 
 ## The fire order is no longer spelled out in plain words; the player must read a riddle.
 static func _hide_fire_order(lv: Dictionary, items: Array, d: int) -> void:
+	if bool(lv.get("no_fire_riddle", false)):
+		return   # levels with their own wording (e.g. the forge) keep their fixed order and text
 	var seq: Array = FIRE_SEQUENCE[d]
 	var any := false
 	for it in items:

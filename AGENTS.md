@@ -29,6 +29,9 @@ Mechanics already in the game (reuse before inventing):
 | night_courier | **stealth timing**: rotating beams from watch towers; awnings (shade) are safe and are the checkpoints; seen = back to last awning; hard adds `hard_towers` | `night_watch_controller.gd`, `_update_night_watch`, `_selftest_night_watch` |
 | frozen_lake | **sliding physics**: on ice `player.acceleration` drops (momentum); stone islands give grip and are checkpoints; thin-ice holes (never inside the lane between islands) = back to last island; jumping over holes is allowed | `ice_lake_controller.gd`, `_update_ice_lake`, `_selftest_ice_lake` |
 | sinking_stones | **timed platforms**: a stone crumbles `hold` s after the first step, returns after `down_time`; static rest pads are checkpoints; a fall = back to the last pad | `sinking_stones_controller.gd`, `_update_sinking_stones`, `_selftest_sinking_stones` |
+| kaveh_forge | **carry firewood** to 3 furnaces in order near->far (`no_fire_riddle: true` keeps the level's own text and order; fires are numbered 0..n-1) | same as simorgh_nest |
+| damavand_path | **timed platforms** (reuse of sinking_stones; own messages via `stones_start_msg` / `stones_safe_msg`) | same as sinking_stones |
+| kaveh_quiz | quiz hall (3 questions from the narrative) | `hall` |
 
 ## Chapters and content-first rule (owner decision, read `documentation/chapters.md`)
 - Levels are grouped into chapters (`LevelData.CHAPTERS`, each level has `"chapter": <id>`). The menu shows chapters.
