@@ -32,6 +32,10 @@ const ICE_ACCEL := [6.0, 4.5, 3.2]           # grip on the ice (m/s^2); lower = 
 const ICE_HOLES := [6, 9, 13]
 const ICE_HOLE_R := [1.8, 2.1, 2.4]
 const ICE_CORRIDOR := [3.2, 2.6, 2.1]         # clear lane between hole edge and the route
+const STONE_SPACING := [3.4, 3.9, 4.3]       # centre-to-centre distance of the crumbling stones
+const STONE_RADIUS := [1.5, 1.3, 1.15]
+const STONE_HOLD := [1.0, 0.7, 0.5]           # seconds from the first step until the stone drops
+const STONE_DOWN := [3.0, 4.0, 4.5]           # seconds a dropped stone stays away
 const WIND_COUNT := [3, 4, 5]
 const WIND_SPEED := [0.85, 1.15, 1.45]
 const WIND_SWEEP := [8.0, 10.0, 12.0]
@@ -105,6 +109,7 @@ static func apply(src: Dictionary, d: int) -> Dictionary:
 	_apply_mosaic(lv, d)
 	_apply_night_watch(lv, d)
 	_apply_ice_lake(lv, d)
+	_apply_sinking_stones(lv, d)
 	_apply_light(lv, d)
 	return lv
 
@@ -185,6 +190,16 @@ static func _apply_ice_lake(lv: Dictionary, d: int) -> void:
 	ice["hole_count"] = ICE_HOLES[d]
 	ice["hole_radius"] = ICE_HOLE_R[d]
 	ice["corridor"] = ICE_CORRIDOR[d]
+
+## Same gorge: smaller stones, wider gaps, faster crumbling.
+static func _apply_sinking_stones(lv: Dictionary, d: int) -> void:
+	if not lv.has("sinking_stones"):
+		return
+	var s: Dictionary = lv["sinking_stones"]
+	s["spacing"] = STONE_SPACING[d]
+	s["radius"] = STONE_RADIUS[d]
+	s["hold"] = STONE_HOLD[d]
+	s["down_time"] = STONE_DOWN[d]
 
 ## Same hall: one, two or three mirrors in the chain (each difficulty has its own layout in the level data).
 static func _apply_light(lv: Dictionary, d: int) -> void:

@@ -27,6 +27,7 @@ Mechanics already in the game (reuse before inventing):
 | mirror_hall | **light + turning**: stand on the yellow (clockwise) / blue (counter-clockwise) disc beside a mirror to turn it in 15° steps (first turn needs a longer stand than running across the disc, enforced in the sanity check); the beam is traced with real reflection maths (`MirrorHallController.trace`) and must reach the lantern; 1/2/3 mirrors by difficulty; nothing can fail | `mirror_hall_controller.gd`, `_update_mirror_hall`, `_selftest_mirror_hall` |
 | night_courier | **stealth timing**: rotating beams from watch towers; awnings (shade) are safe and are the checkpoints; seen = back to last awning; hard adds `hard_towers` | `night_watch_controller.gd`, `_update_night_watch`, `_selftest_night_watch` |
 | frozen_lake | **sliding physics**: on ice `player.acceleration` drops (momentum); stone islands give grip and are checkpoints; thin-ice holes (never inside the lane between islands) = back to last island; jumping over holes is allowed | `ice_lake_controller.gd`, `_update_ice_lake`, `_selftest_ice_lake` |
+| sinking_stones | **timed platforms**: a stone crumbles `hold` s after the first step, returns after `down_time`; static rest pads are checkpoints; a fall = back to the last pad | `sinking_stones_controller.gd`, `_update_sinking_stones`, `_selftest_sinking_stones` |
 
 ## Difficulty is mandatory, not optional
 Three levels: 0 easy (original data), 1 medium (default), 2 challenge. They are NOT hand-written

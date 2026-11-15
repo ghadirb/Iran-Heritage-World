@@ -65,6 +65,8 @@ var mosaic: MosaicCourtController
 var mirror_hall: MirrorHallController
 var night_watch: NightWatchController
 var ice_lake: IceLakeController
+var sinking_stones: SinkingStonesController
+var stones_msg_shown := false
 var base_acceleration := 28.0
 
 func _ready() -> void:
@@ -189,6 +191,8 @@ func load_level(index: int, announce: bool = true) -> void:
 	mirror_hall = null
 	night_watch = null
 	ice_lake = null
+	sinking_stones = null
+	stones_msg_shown = false
 	player.acceleration = base_acceleration
 	shoot_cooldown = 0.0
 	archery_time = 0.0
@@ -239,6 +243,8 @@ func load_level(index: int, announce: bool = true) -> void:
 		_build_night_watch()
 	if level.has("ice_lake"):
 		_build_ice_lake()
+	if level.has("sinking_stones"):
+		_build_sinking_stones()
 	_setup_bow()
 	_build_ambient_particles()
 	var sp: Vector2 = level["spawn"]
@@ -266,6 +272,9 @@ func load_level(index: int, announce: bool = true) -> void:
 		night_watch.reset()
 	if ice_lake:
 		ice_lake.reset()
+	if sinking_stones:
+		sinking_stones.reset()
+		stones_msg_shown = false
 	player.input_enabled = true
 	hud.close_all_modals()
 	hud.set_level_info(str(level["title"]), str(level["subtitle"]))
@@ -753,6 +762,25 @@ func _update_mirror_hall(delta: float) -> void:
 			_msg("mirror_solved", 3.5)
 			_check_finish()
 
+# ---------- sinking stones (chapter 17): crumbling stepping stones over a gorge ----------
+
+func _build_sinking_stones() -> void:
+	sinking_stones = SinkingStonesController.new()
+	sinking_stones.build(level_root, terrain, level)
+
+func _update_sinking_stones(delta: float) -> void:
+	if sinking_stones == null:
+		return
+	if not stones_msg_shown and player.global_position.z < float((level["chasm"] as Dictionary)["z0"]) + 6.0:
+		stones_msg_shown = true
+		_msg("stones_start", 5.0)
+	if sinking_stones.step(delta, player.global_position, player.is_on_floor()) == "crossed":
+		for it in items:
+			if str((it["data"] as Dictionary)["kind"]) == "stones_finish" and not bool(it["done"]):
+				_mark_done(it)
+		_msg("stones_safe", 3.5)
+		_check_finish()
+
 # ---------- ice lake (chapter 16): slide across the ice, stone islands give grip ----------
 
 func _build_ice_lake() -> void:
@@ -961,6 +989,7 @@ func _physics_process(delta: float) -> void:
 	_update_mirror_hall(delta)
 	_update_night_watch(delta)
 	_update_ice_lake(delta)
+	_update_sinking_stones(delta)
 	if moving_stones.is_empty():
 		return
 	chain_time += delta
@@ -1053,7 +1082,7 @@ func _build_interactables() -> void:
 			"roll_finish":
 				node = PropFactory.make_clue_marker("clue")
 				pos += Vector3(0, 0.9, 0)
-			"turn_finish", "lamp_finish", "mosaic_finish", "mirror_finish", "watch_finish", "ice_finish":
+			"turn_finish", "lamp_finish", "mosaic_finish", "mirror_finish", "watch_finish", "ice_finish", "stones_finish":
 				node = PropFactory.make_clue_marker("clue")
 				pos += Vector3(0, 0.9, 0)
 			"npc":
@@ -1343,6 +1372,10 @@ func _process(delta: float) -> void:
 		var rest := turning_bridge.static_checkpoint(player.global_position)
 		if rest != Vector3.ZERO:
 			checkpoint = rest
+	if sinking_stones and player.is_on_floor():
+		var pad_rest := sinking_stones.static_checkpoint(player.global_position)
+		if pad_rest != Vector3.ZERO:
+			checkpoint = pad_rest
 	_auto_actions()
 	_update_bridge()
 	_update_scale(delta)
@@ -1485,6 +1518,8 @@ func _selftest_level(i: int) -> int:
 		failures += await _selftest_night_watch()
 	if level.has("ice_lake"):
 		failures += await _selftest_ice_lake()
+	if level.has("sinking_stones"):
+		failures += await _selftest_sinking_stones()
 	for it in items:
 		if not bool((it["data"] as Dictionary).get("finale", false)):
 			it["done"] = true
@@ -1912,6 +1947,72 @@ func _selftest_mosaic() -> int:
 ## in opposite directions, and turning the mirrors to the solution must put the light on the lantern.
 ## Standing in a beam must get the courier caught, shade must be safe, and a careful bot (waits in the shade
 ## until the way to the next awning is clear, with real physics) must reach the last station.
+## A stone must crumble once stepped on (and come back), and a jumping bot must cross with the real physics.
+func _selftest_sinking_stones() -> int:
+	var ss := sinking_stones
+	if ss == null or ss.tiles.is_empty():
+		print("  sinking_stones: controller missing")
+		return 1
+	# 1) stepping on a stone makes it crumble after `hold`, and it returns after `down_time`
+	var t0: Dictionary = ss.tiles[0]
+	var top: Vector3 = t0["pos"]
+	player.global_position = top + Vector3(0, 0.6, 0)
+	player.velocity = Vector3.ZERO
+	GameState.move_vector = Vector2.ZERO
+	var crumbled := false
+	for _f in range(int((ss.hold + 0.6) * 60.0)):
+		await get_tree().physics_frame
+		if str(t0["state"]) == "gone":
+			crumbled = true
+			break
+	var returned := false
+	player.global_position = spawn_point
+	player.velocity = Vector3.ZERO
+	for _f in range(int((ss.down_time + 1.5) * 60.0)):
+		await get_tree().physics_frame
+		if str(t0["state"]) == "idle":
+			returned = true
+			break
+	# 2) a jumping bot crosses the gorge
+	ss.reset()
+	player.global_position = spawn_point
+	player.velocity = Vector3.ZERO
+	checkpoint = spawn_point
+	var falls := 0
+	var air_scale := 1.0
+	var falling := false
+	for _frame in range(5200):
+		if ss.crossed:
+			break
+		var target := ss.guide_point(player.global_position)
+		var d := Vector2(target.x - player.global_position.x, target.z - player.global_position.z)
+		if d.length() > 0.6:
+			if player.is_on_floor():
+				air_scale = 1.0
+				var hop := d.length() <= 5.2 and d.length() > 1.6 and player.global_position.z < float((level["chasm"] as Dictionary)["z0"]) + 9.0
+				if hop or (d.length() > 5.2 and _ground_ends_ahead(d.normalized()) and player.global_position.z < float((level["chasm"] as Dictionary)["z1"]) + 8.0):
+					# one hop lasts ~0.8 s: pick the ground speed that carries the courier onto the near part of the next stone
+					var reach := d.length() - (0.5 * ss.radius if hop else 0.0)
+					air_scale = clampf((reach + 0.7) / 0.8, 2.5, base_run_speed) / base_run_speed
+					player.request_jump()
+			GameState.move_vector = d.normalized() * air_scale
+		else:
+			GameState.move_vector = Vector2(0, -1)
+		await get_tree().physics_frame
+		if player.global_position.y < -2.0 and not falling:
+			falling = true
+			falls += 1
+			print("   fall %d at frame %d pos=%s target=%s air_scale=%.2f" % [falls, _frame, player.global_position, target, air_scale])
+		if player.global_position.y > 0.0:
+			falling = false
+	GameState.move_vector = Vector2.ZERO
+	var finish_done := false
+	for it in items:
+		if str((it["data"] as Dictionary)["kind"]) == "stones_finish":
+			finish_done = bool(it["done"])
+	print("  sinking_stones: difficulty=%d stones=%d crossed=%s finish=%s crumbles=%s returns=%s falls=%d" % [GameState.difficulty, ss.tiles.size(), ss.crossed, finish_done, crumbled, returned, falls])
+	return 0 if (ss.crossed and finish_done and crumbled and returned) else 1
+
 func _selftest_ice_lake() -> int:
 	var ice := ice_lake
 	if ice == null:
@@ -2270,6 +2371,11 @@ func _selftest_difficulty_sanity() -> int:
 			for dj in range(di + 1, disc_list.size()):
 				if dv.distance_to(disc_list[dj]) < float(ld["disc_radius"]) * 2.0 + 0.5:
 					bad += 1
+	if level.has("sinking_stones"):
+		var sk: Dictionary = level["sinking_stones"]
+		# a hop is ~4.3 m at full speed: stones farther apart than that could not be crossed
+		if float(sk["spacing"]) > 4.4 or float(sk["radius"]) < 1.0 or float(sk["hold"]) < 0.4 or float(sk["down_time"]) < 2.0:
+			bad += 1
 	if level.has("ice_lake"):
 		var il: Dictionary = level["ice_lake"]
 		var isl: Array = il["islands"]
