@@ -43,6 +43,7 @@ Mechanics already in the game (reuse before inventing):
 - Never reorder/insert levels in the middle of `LEVELS` (progress is keyed by index). Append inside a NEW chapter.
 - `_selftest_chapters()` enforces: chapters cover every level once, consecutive and in order; label + review
   state; sources for myth/folklore/history chapters.
+- Scenery never buries an interactable: `terrain.avoid_points` (filled with every interactable position in `_build_vegetation`) keeps trees and rocks 4 m away, and the selftest fails when a tree/rock is within 3 m of any item (a log was once hidden under a rock in the Kaveh forge, so players found only two of three logs).
 - Look at what you build: `--shot` for levels and `--menu=main|<chapter index>` for the menus.
 - Voice workflow: owner uploads mp3 to `assets-source/audio/` named `<level>__<key>.mp3` / `game__<id>.mp3`;
   convert only the new files with the settings in `tools/convert_voice.py` (match by exact name prefix, not a

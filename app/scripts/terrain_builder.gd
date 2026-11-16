@@ -310,6 +310,11 @@ func solid_vertex_material(roughness: float = 0.95) -> StandardMaterial3D:
 
 # ---------- scatter ----------
 
+## Scenery (trees, rocks) must never bury a log, furnace, pedestal, NPC ... : the world controller fills this
+## with every interactable position of the level, and scatter_points skips anything closer than avoid_radius.
+var avoid_points: Array[Vector2] = []
+var avoid_radius := 4.0
+
 func scatter_points(count: int, min_path_dist: float, max_spread: float, avoid_river: bool = true) -> Array[Vector3]:
 	var pts: Array[Vector3] = []
 	var attempts := 0
@@ -323,6 +328,13 @@ func scatter_points(count: int, min_path_dist: float, max_spread: float, avoid_r
 			var rw := float((cfg["river"] as Dictionary).get("width", 1.5)) + 2.5
 			if absf(x - river_x(z)) < rw:
 				continue
+		var blocked := false
+		for ap in avoid_points:
+			if Vector2(x - ap.x, z - ap.y).length() < avoid_radius:
+				blocked = true
+				break
+		if blocked:
+			continue
 		var h := height(x, z)
 		if h < -3.0 and cfg.has("chasm"):
 			continue

@@ -62,6 +62,7 @@ var rolling_course: RollingCourseController
 var turning_bridge: TurningBridgeController
 var lamp_carry: LampCarryController
 var mosaic: MosaicCourtController
+var scenery_points: Array[Vector3] = []   # trees and rocks of the current level (selftest: none may hide an interactable)
 var mirror_hall: MirrorHallController
 var night_watch: NightWatchController
 var ice_lake: IceLakeController
@@ -436,8 +437,15 @@ func _build_ground() -> void:
 
 func _build_vegetation() -> void:
 	var tree_count := int(level["trees"])
+	terrain.avoid_points.clear()
+	for it0 in (level["interactables"] as Array):
+		if it0.has("pos"):   # world position (data positions are relative to the path)
+			var gp := _ground_pos(it0["pos"])
+			terrain.avoid_points.append(Vector2(gp.x, gp.z))
+	scenery_points.clear()
 	if tree_count > 0:
 		var pts := terrain.scatter_points(tree_count, maxf(5.0, float(level.get("lane_clear", 0.0))), float(level["valley_half"]) + 22.0)
+		scenery_points.append_array(pts)
 		var trees := terrain.build_multimesh(terrain.make_pine_mesh(), terrain.solid_vertex_material(0.95), pts, 0.85, 1.7)
 		level_root.add_child(trees)
 		var tb := StaticBody3D.new()
@@ -454,6 +462,7 @@ func _build_vegetation() -> void:
 	if rock_count > 0:
 		for variant in range(3):
 			var rp := terrain.scatter_points(rock_count / 3, maxf(3.0, float(level.get("lane_clear", 0.0))), float(level["valley_half"]) + 20.0, false)
+			scenery_points.append_array(rp)
 			var rmat := terrain.solid_vertex_material(1.0)
 			rmat.albedo_color = Color(str(level["rock"])).lightened(0.05 * float(variant))
 			var rocks := terrain.build_multimesh(terrain.make_rock_mesh(variant), rmat, rp, 0.8, 3.2)
@@ -1618,6 +1627,16 @@ func _selftest_level(i: int) -> int:
 	for _f in range(40):
 		await get_tree().physics_frame
 	var standing := player.is_on_floor()
+	# a log, furnace, pedestal ... buried under a tree or rock cannot be found (seen in the Kaveh forge)
+	for it in items:
+		var ip: Vector3 = (it["node"] as Node3D).global_position if it.has("node") and it["node"] is Node3D else Vector3.INF
+		if ip == Vector3.INF:
+			continue
+		for sp in scenery_points:
+			if Vector2(sp.x - ip.x, sp.z - ip.z).length() < 3.0:
+				print("  item %s is hidden by scenery (%.1f m)" % [str((it["data"] as Dictionary)["id"]), Vector2(sp.x - ip.x, sp.z - ip.z).length()])
+				failures += 1
+				break
 	print("level %d (%s): items=%d on_floor=%s y=%.2f" % [i, level["id"], items.size(), standing, player.global_position.y])
 	if not standing:
 		failures += 1
