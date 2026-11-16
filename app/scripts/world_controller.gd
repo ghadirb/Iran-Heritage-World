@@ -2841,7 +2841,7 @@ func _solve_scale() -> void:
 	for it in items:
 		if str((it["data"] as Dictionary)["kind"]) == "scale":
 			_mark_done(it)
-	_msg("scale_solved", 4.5)
+	_msg(str(level.get("scale_solved_msg", "scale_solved")), 4.5)
 	var tw := create_tween()
 	tw.tween_property(scale_door, "position:y", scale_door.position.y + 8.2, 1.8).set_trans(Tween.TRANS_SINE)
 	tw.tween_callback(func() -> void: scale_door_col.set_deferred("disabled", true))

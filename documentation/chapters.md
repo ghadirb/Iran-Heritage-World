@@ -12,6 +12,7 @@ The first screen therefore stays short however many levels exist.
 | `arash` فصل ۲ | 7 | Arash the archer (folklore) — a single level | needs editorial review, sources to be recorded |
 | `skills` فصل ۳ | 8–17 | Ten **skill levels** with an Iranian look (wind, water, bridge, caravan lamp, mosaic, mirrors, night courier, ice, river stones). They were built to try mechanics; they are NOT tied to a specific event or period | **frozen** — do not add levels here |
 | `kaveh_zahhak` فصل ۴ | 18–20 | Kaveh the blacksmith and Zahhak (Shahnameh) — first chapter built content-first; brief in `documentation/chapters/kaveh_zahhak.md` | needs editorial review, primary-source lines still to be recorded |
+| `jamshid_nowruz` فصل ۵ | 21–22 | Jamshid and Nowruz: Shahnameh myth separated from the UN/UNESCO documented facts; brief in `documentation/chapters/jamshid_nowruz.md` | needs editorial review, Shahnameh lines still to be recorded |
 
 Mistake we made and must not repeat: after chapter 7 we kept inventing new *mechanics* (13–17) without a story,
 period or source behind them. The game drifted from its purpose (Iran, its history and myths).
