@@ -31,6 +31,9 @@ Mechanics already in the game (reuse before inventing):
 | sinking_stones | **timed platforms**: a stone crumbles `hold` s after the first step, returns after `down_time`; static rest pads are checkpoints; a fall = back to the last pad | `sinking_stones_controller.gd`, `_update_sinking_stones`, `_selftest_sinking_stones` |
 | kaveh_forge | **carry firewood** to 3 furnaces in order near->far (`no_fire_riddle: true` keeps the level's own text and order; fires are numbered 0..n-1) | same as simorgh_nest |
 | damavand_path | **timed platforms** (reuse of sinking_stones; own messages via `stones_start_msg` / `stones_safe_msg`; `"water": false` in `sinking_stones` removes the gorge river for a mountain) | same as sinking_stones |
+| cylinder_deposit | **calm carry** re-themed (`lamp_road.item: "cylinder"`, `lamp_msg_prefix: "cyl"`): fragile clay cylinder, cushioned rest stands, foundation wall | same as caravan_lamp |
+| pasargadae_tomb | **carry** re-themed to stone blocks (`carry_visual: "stone"`, `carry_msg_prefix: "stone"`, braziers with `place: "stone"` become footings, `lit_text`, `wrong_text`) | same as simorgh_nest |
+| cyrus_quiz | quiz hall (3 questions; documented facts vs later claims) | `hall` |
 | nowruz_equinox | balance scale re-themed (equal day and night); own solved message via `scale_solved_msg` | same as balance_gate |
 | nowruz_quiz | quiz hall: separates the Shahnameh myth from UN/UNESCO facts | `hall` |
 | kaveh_quiz | quiz hall (3 questions from the narrative) | `hall` |

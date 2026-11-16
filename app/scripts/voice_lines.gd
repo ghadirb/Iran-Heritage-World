@@ -70,7 +70,7 @@ static func _message_rows(rows: Array, seen: Dictionary) -> void:
 		for d in level["interactables"]:
 			match str(d["kind"]):
 				"brazier":
-					_row(rows, seen, lid, "fire_lit_" + str(d["id"]), "پیام کوتاه بازی (آتش روشن شد)", "راوی", GameMessages.FIRE_LIT % str(d["title"]), 2, false)
+					_row(rows, seen, lid, "fire_lit_" + str(d["id"]), "پیام کوتاه بازی (آتش روشن شد)", "راوی", GameMessages.lit_text(level) % str(d["title"]), 2, false)
 				"npc":
 					if bool(d.get("finale", false)):
 						finale_title = str(d["title"])

@@ -423,7 +423,30 @@ static func make_trunk() -> Node3D:
 		root.add_child(part(box(Vector3(0.5, 0.08, 0.1)), mat(Color("#4a3320"), 1.0), Vector3(-0.8 + 0.8 * float(k), 0.5, 0.0)))
 	return root
 
-static func make_log() -> Node3D:
+## A carried building stone (levels with "carry_visual": "stone") and the footing it is placed on.
+static func make_stone_block() -> Node3D:
+	var root := Node3D.new()
+	root.add_child(part(box(Vector3(0.9, 0.45, 0.6)), mat(Color("#cfc8b8"), 0.95), Vector3(0, 0.25, 0)))
+	var halo := part(sphere(0.12, 8), mat(Color("#ffd36b"), 0.2, 0.2, 2.0), Vector3(0, 0.95, 0))
+	halo.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	root.add_child(halo)
+	return root
+
+static func make_plinth(color: Color) -> Node3D:
+	var root := Node3D.new()
+	root.add_child(part(box(Vector3(1.6, 0.3, 1.2)), mat(Color("#8a8374"), 0.95), Vector3(0, 0.15, 0)))
+	root.add_child(part(cylinder(0.04, 0.05, 2.6), mat(Color("#3d342a"), 0.9), Vector3(0.95, 1.3, 0)))
+	root.add_child(part(box(Vector3(0.08, 0.5, 0.8)), mat(color, 0.7, 0.0, 0.35), Vector3(0.95, 2.3, 0.45)))
+	var ring := part(TorusMesh.new(), mat(color, 0.6, 0.0, 0.5), Vector3(0, 0.06, 0))
+	(ring.mesh as TorusMesh).inner_radius = 1.1
+	(ring.mesh as TorusMesh).outer_radius = 1.35
+	ring.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	root.add_child(ring)
+	return root
+
+static func make_log(stone: bool = false) -> Node3D:
+	if stone:
+		return make_stone_block()
 	var root := Node3D.new()
 	var body := part(cylinder(0.22, 0.22, 1.4, 8), mat(Color("#6b4a2b"), 0.95), Vector3(0, 0.25, 0))
 	body.rotation.z = PI * 0.5

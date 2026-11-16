@@ -47,6 +47,15 @@ const TEXT := {
 	"ice_start": "روی یخ می‌لغزی؛ آرام و حساب‌شده برو و از حفره‌های تیره دوری کن.",
 	"ice_plunge": "یخ شکست! به آخرین جزیره برگشتی.",
 	"ice_safe": "از دریاچه‌ی یخ‌زده گذشتی!",
+	"cyl_refill": "روی تکیه‌گاهِ نرم، استوانه آرام گرفت؛ آرام ادامه بده.",
+	"cyl_warn": "استوانه می‌لرزد؛ آرام‌تر برو.",
+	"cyl_low": "استوانه هنوز می‌لرزد و به شالوده نمی‌رسد؛ کنار تکیه‌گاهِ نرم آرامش کن.",
+	"cyl_out": "نزدیک بود استوانه ترک بخورد؛ از آخرین تکیه‌گاه دوباره آرام آغاز کن.",
+	"cyl_safe": "استوانه سالم به شالوده‌ی دیوار رسید!",
+	"stone_log_pick": "سنگ برداشتی و کندتر می‌دوی. در پی تعامل بزن؛ دور از پی، سنگ را زمین می‌گذارد.",
+	"stone_log_drop": "سنگ را زمین گذاشتی.",
+	"stone_need_log": "برای گذاشتن روی پی، نخست یک سنگ بردار و بیاور.",
+	"stone_log_carry": "سنگ برداشتی و کندتر می‌دوی. آن را تا پی ببر.",
 	"watch_start": "برج‌ها نور می‌پراکنند؛ زیر سایه‌بان در امانی. وقتی پرتو گذشت، بدو.",
 	"watch_seen": "نور بر تو افتاد؛ به آخرین سایه‌بان برگشتی.",
 	"watch_safe": "از زیر نورها گذشتی و به ایستگاه رسیدی!",
@@ -54,6 +63,10 @@ const TEXT := {
 const FIRE_LIT := "%s روشن شد."
 const GO_FINALE := "همه‌ی بخش‌ها کامل شد. به سراغ «%s» برو."
 
+## Text after a furnace/footing is done (levels may re-theme it with "lit_text").
+static func lit_text(level: Dictionary) -> String:
+	return str(level.get("lit_text", FIRE_LIT))
+
 ## Easy shows the colours; harder variants show the riddle (level["order_hint"]).
 static func wrong_order(level: Dictionary) -> String:
-	return "ترتیب درست نبود؛ آتش‌ها خاموش شدند. " + str(level.get("order_hint", "سرخ، آبی، زرد، سبز."))
+	return str(level.get("wrong_text", "ترتیب درست نبود؛ آتش‌ها خاموش شدند.")) + " " + str(level.get("order_hint", "سرخ، آبی، زرد، سبز."))

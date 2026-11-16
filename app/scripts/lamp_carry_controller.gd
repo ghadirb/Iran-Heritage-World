@@ -28,7 +28,9 @@ var refills := 0
 var outs := 0
 var active := false
 var arrived := false
+var item := "lamp"          # "lamp" or "cylinder" (a fragile baked-clay cylinder: calm steps keep it from cracking)
 var lamp: Node3D
+var item_mat: StandardMaterial3D
 var flame: MeshInstance3D
 var light: OmniLight3D
 
@@ -36,6 +38,7 @@ func build(parent: Node3D, terrain_builder: TerrainBuilder, level: Dictionary) -
 	root = parent
 	terrain = terrain_builder
 	data = level["lamp_road"]
+	item = str(data.get("item", "lamp"))
 	walk_limit = float(data["walk_limit"])
 	drain = float(data["drain"])
 	jump_cost = float(data["jump_cost"])
@@ -132,6 +135,10 @@ func _follow(pos: Vector3, facing_y: float) -> void:
 	if not is_instance_valid(lamp):
 		return
 	lamp.global_position = pos + Basis(Vector3.UP, facing_y) * Vector3(-0.42, 0.95, 0.22)
+	if item == "cylinder":
+		# the clay darkens and looks stressed as it loses its steadiness
+		item_mat.albedo_color = Color("#7a4a2c").lerp(Color("#c99a64"), clampf(oil, 0.0, 1.0))
+		return
 	var flicker := 1.0 + 0.07 * sin(elapsed * 17.0)
 	var k := (0.35 + 0.65 * clampf(oil, 0.0, 1.0)) * flicker
 	flame.scale = Vector3.ONE * k
@@ -140,6 +147,13 @@ func _follow(pos: Vector3, facing_y: float) -> void:
 func _build_lamp() -> void:
 	lamp = Node3D.new()
 	lamp.name = "CaravanLamp"
+	if item == "cylinder":
+		item_mat = PropFactory.mat(Color("#c99a64"), 0.95)
+		var cyl := PropFactory.part(PropFactory.cylinder(0.13, 0.13, 0.46, 12), item_mat, Vector3(0, 0.0, 0))
+		cyl.rotation.z = PI * 0.5   # carried lying down, like the object in the museum
+		lamp.add_child(cyl)
+		root.add_child(lamp)
+		return
 	lamp.add_child(PropFactory.part(PropFactory.cylinder(0.12, 0.16, 0.22, 10), PropFactory.mat(Color("#8a5a3a"), 0.9), Vector3(0, -0.12, 0)))
 	flame = PropFactory.part(PropFactory.sphere(0.13, 10), PropFactory.mat(Color("#ffb347"), 0.2, 0.0, 3.0), Vector3(0, 0.08, 0))
 	flame.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
@@ -155,6 +169,9 @@ func _build_station(p: Vector3) -> void:
 	var n := Node3D.new()
 	n.name = "OilJar"
 	n.position = p
+	if item == "cylinder":
+		_build_rest_stand(n)
+		return
 	var clay := PropFactory.mat(Color("#a2603a"), 0.9)
 	n.add_child(PropFactory.part(PropFactory.cylinder(0.7, 0.8, 0.25, 12), PropFactory.mat(Color("#7d7468"), 1.0), Vector3(0, 0.12, 0)))
 	n.add_child(PropFactory.part(PropFactory.sphere(0.62, 14), clay, Vector3(0, 0.95, 0), Vector3(1.0, 1.15, 1.0)))
@@ -170,10 +187,34 @@ func _build_station(p: Vector3) -> void:
 	n.add_child(beam)
 	root.add_child(n)
 
+## A low stone stand with a soft cloth cushion: where the fragile cylinder is allowed to rest.
+func _build_rest_stand(n: Node3D) -> void:
+	n.add_child(PropFactory.part(PropFactory.cylinder(0.7, 0.8, 0.25, 12), PropFactory.mat(Color("#7d7468"), 1.0), Vector3(0, 0.12, 0)))
+	n.add_child(PropFactory.part(PropFactory.box(Vector3(1.5, 0.35, 0.9)), PropFactory.mat(Color("#9b3b2e"), 0.95), Vector3(0, 0.42, 0)))
+	var glow := PropFactory.mat(Color("#ffd36b"), 0.2, 0.2, 2.2)
+	var ring := PropFactory.part(TorusMesh.new(), glow, Vector3(0, 0.1, 0))
+	(ring.mesh as TorusMesh).inner_radius = refill_radius - 0.12
+	(ring.mesh as TorusMesh).outer_radius = refill_radius
+	ring.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	n.add_child(ring)
+	var beam := PropFactory.part(PropFactory.cylinder(0.09, 0.09, 7.0, 8), PropFactory.beam_material(), Vector3(0, 3.5, 0))
+	beam.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	n.add_child(beam)
+	root.add_child(n)
+
 func _build_tower(p: Vector3) -> void:
 	var n := Node3D.new()
 	n.name = "LampTower"
 	n.position = p
+	if item == "cylinder":
+		# a mud-brick wall with an open foundation trench where the cylinder is laid
+		var brick := PropFactory.mat(Color("#b08a5b"), 1.0)
+		n.add_child(PropFactory.part(PropFactory.box(Vector3(2.4, 2.4, 0.9)), brick, Vector3(-2.2, 1.2, 0)))
+		n.add_child(PropFactory.part(PropFactory.box(Vector3(2.4, 2.4, 0.9)), brick, Vector3(2.2, 1.2, 0)))
+		n.add_child(PropFactory.part(PropFactory.box(Vector3(2.0, 1.1, 0.9)), brick, Vector3(0, 1.85, 0)))
+		n.add_child(PropFactory.part(PropFactory.sphere(0.3, 10), PropFactory.mat(Color("#ffd36b"), 0.2, 0.0, 2.4), Vector3(0, 3.0, 0)))
+		root.add_child(n)
+		return
 	var stone := PropFactory.mat(Color("#8f8777"), 1.0)
 	n.add_child(PropFactory.part(PropFactory.cylinder(1.1, 1.5, 4.2, 12), stone, Vector3(0, 2.1, 0)))
 	n.add_child(PropFactory.part(PropFactory.cylinder(1.5, 1.2, 0.5, 12), PropFactory.mat(Color("#6d6558"), 1.0), Vector3(0, 4.45, 0)))

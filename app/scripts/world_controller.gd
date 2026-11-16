@@ -724,23 +724,23 @@ func _update_lamp_road(delta: float) -> void:
 		checkpoint = lamp_carry.last_station + Vector3(0, 1.2, 0)
 	match result:
 		"refill":
-			_msg("lamp_refill", 3.0)
+			_msg(_lamp_msg("refill"), 3.0)
 		"warn":
-			_msg("lamp_warn", 3.0)
+			_msg(_lamp_msg("warn"), 3.0)
 		"low":
-			_msg("lamp_low", 4.0)
+			_msg(_lamp_msg("low"), 4.0)
 		"out":
 			mistakes += 1
 			if lamp_carry.last_station == Vector3.ZERO:
 				checkpoint = spawn_point
 			_respawn(false)
 			lamp_carry.after_out()
-			_msg("lamp_out", 4.0)
+			_msg(_lamp_msg("out"), 4.0)
 		"arrived":
 			for it in items:
 				if str((it["data"] as Dictionary)["kind"]) == "lamp_finish" and not bool(it["done"]):
 					_mark_done(it)
-			_msg("lamp_safe", 3.5)
+			_msg(_lamp_msg("safe"), 3.5)
 			_check_finish()
 
 # ---------- mosaic court (chapter 13): repeat the lit order by standing on tiles ----------
@@ -1094,9 +1094,12 @@ func _build_interactables() -> void:
 				if not str(data["id"]).begins_with("banner"):
 					pos += Vector3(0, 0.9, 0)
 			"brazier":
-				node = PropFactory.make_brazier(Color(str(data["color"])))
+				if str(data.get("place", "")) == "stone":
+					node = PropFactory.make_plinth(Color(str(data["color"])))
+				else:
+					node = PropFactory.make_brazier(Color(str(data["color"])))
 			"log":
-				node = PropFactory.make_log()
+				node = PropFactory.make_log(str(level.get("carry_visual", "")) == "stone")
 			"quiz":
 				node = PropFactory.make_pedestal()
 			"scale":
@@ -1242,7 +1245,7 @@ func _auto_actions() -> void:
 				if not carrying.is_empty() or not _has_logs():
 					_use_brazier(it)
 				else:
-					_msg("need_log", 3.5)
+					_msg(_carry_msg("need_log"), 3.5)
 
 func _collect(it: Dictionary) -> void:
 	var node: Node3D = it["node"]
@@ -1290,7 +1293,17 @@ func _pick_log(it: Dictionary) -> void:
 	node.position = Vector3(0, 2.3, 0)
 	node.rotation = Vector3.ZERO
 	player.run_speed = base_run_speed * float(DifficultyRules.CARRY_SPEED[GameState.difficulty])
-	_msg("log_carry", 4.5)
+	_msg(_carry_msg("log_carry"), 4.5)
+
+## Levels may re-theme the carrying messages ("carry_msg_prefix": "stone" -> "stone_log_pick" ...).
+func _carry_msg(base: String) -> String:
+	var pre := str(level.get("carry_msg_prefix", ""))
+	return base if pre == "" else pre + "_" + base
+
+## Same for the lamp road ("lamp_msg_prefix": "cyl" -> "cyl_refill" ...).
+func _lamp_msg(base: String) -> String:
+	var pre := str(level.get("lamp_msg_prefix", "lamp"))
+	return pre + "_" + base
 
 func _release_log() -> void:
 	carrying = {}
@@ -1305,7 +1318,7 @@ func _drop_log() -> void:
 	node.position = Vector3(x, terrain.height(x, z), z)
 	it["done"] = false
 	_release_log()
-	_msg("log_drop", 2.0)
+	_msg(_carry_msg("log_drop"), 2.0)
 
 ## Wrong fire: the wood is not lost, it goes back where it was found.
 func _return_log() -> void:
@@ -1322,7 +1335,7 @@ func _use_brazier(it: Dictionary) -> void:
 		hud.toast("این آتش پیش‌تر روشن شده است.", 2.0)
 		return
 	if _has_logs() and carrying.is_empty():
-		_msg("need_log", 3.5)
+		_msg(_carry_msg("need_log"), 3.5)
 		return
 	if int(d["order"]) == brazier_next:
 		brazier_next += 1
@@ -1332,9 +1345,14 @@ func _use_brazier(it: Dictionary) -> void:
 			_release_log()
 		_mark_done(it)
 		var node: Node3D = it["node"]
-		var flame := PropFactory.make_flame(Color(str(d["color"])))
-		node.add_child(flame)
-		_say(GameMessages.FIRE_LIT % str(d["title"]), "%s__fire_lit_%s" % [str(level["id"]), str(d["id"])], 2.5)
+		if str(d.get("place", "")) == "stone":
+			var placed := PropFactory.make_stone_block()
+			placed.name = "Flame"   # same name so a wrong order removes it like a flame
+			placed.position = Vector3(0, 0.3, 0)
+			node.add_child(placed)
+		else:
+			node.add_child(PropFactory.make_flame(Color(str(d["color"]))))
+		_say(GameMessages.lit_text(level) % str(d["title"]), "%s__fire_lit_%s" % [str(level["id"]), str(d["id"])], 2.5)
 		_check_finish()
 	else:
 		mistakes += 1
