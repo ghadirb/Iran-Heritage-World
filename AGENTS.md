@@ -34,6 +34,9 @@ Mechanics already in the game (reuse before inventing):
 | cylinder_deposit | **calm carry** re-themed (`lamp_road.item: "cylinder"`, `lamp_msg_prefix: "cyl"`): fragile clay cylinder, cushioned rest stands, foundation wall | same as caravan_lamp |
 | pasargadae_tomb | **carry** re-themed to stone blocks (`carry_visual: "stone"`, `carry_msg_prefix: "stone"`, braziers with `place: "stone"` become footings, `lit_text`, `wrong_text`) | same as simorgh_nest |
 | cyrus_quiz | quiz hall (3 questions; documented facts vs later claims) | `hall` |
+| royal_road_relay | **timed gusts** re-themed (`wind_msg_prefix: "relay"`): storm columns, courier station | same as wind_path |
+| persepolis_gift | **calm carry** re-themed (`item: "gift"`, `lamp_msg_prefix: "gift"`): golden cup to the Gate of All Nations | same as caravan_lamp |
+| persepolis_quiz | quiz hall (4 questions) | `hall` |
 | nowruz_equinox | balance scale re-themed (equal day and night); own solved message via `scale_solved_msg` | same as balance_gate |
 | nowruz_quiz | quiz hall: separates the Shahnameh myth from UN/UNESCO facts | `hall` |
 | kaveh_quiz | quiz hall (3 questions from the narrative) | `hall` |

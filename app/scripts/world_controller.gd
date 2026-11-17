@@ -661,7 +661,7 @@ func _update_wind_course(delta: float) -> void:
 	var result := wind_course.step(delta, player.global_position)
 	if result == "caught":
 		mistakes += 1
-		_msg("wind_caught", 3.0)
+		_msg(str(level.get("wind_msg_prefix", "wind")) + "_caught", 3.0)
 		_respawn(false)
 	elif result == "checkpoint":
 		# The player has already crossed a gust on ordinary terrain, so this is
@@ -671,7 +671,7 @@ func _update_wind_course(delta: float) -> void:
 		for it in items:
 			if str((it["data"] as Dictionary)["kind"]) == "wind_finish" and not bool(it["done"]):
 				_mark_done(it)
-		_msg("wind_safe", 3.5)
+		_msg(str(level.get("wind_msg_prefix", "wind")) + "_safe", 3.5)
 		_check_finish()
 
 # ---------- rolling course (chapter 10): physically guide a clay ball ----------
