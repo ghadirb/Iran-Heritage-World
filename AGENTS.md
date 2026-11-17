@@ -37,6 +37,10 @@ Mechanics already in the game (reuse before inventing):
 | royal_road_relay | **timed gusts** re-themed (`wind_msg_prefix: "relay"`): storm columns, courier station | same as wind_path |
 | persepolis_gift | **calm carry** re-themed (`item: "gift"`, `lamp_msg_prefix: "gift"`): golden cup to the Gate of All Nations | same as caravan_lamp |
 | persepolis_quiz | quiz hall (4 questions) | `hall` |
+| haft_khan_dragon | **timed gusts** re-themed (`wind_msg_prefix: "dragon"`) | same as wind_path |
+| haft_khan_witch | **mirror hall** re-themed (`mirror_msg_prefix: "witch"`) | same as mirror_hall |
+| haft_khan_div | **calm carry** re-themed (`item: "vial"`, `lamp_msg_prefix: "vial"`): phial to the king's tent | same as caravan_lamp |
+| rostam_quiz | quiz hall (4 questions: myth vs history) | `hall` |
 | nowruz_equinox | balance scale re-themed (equal day and night); own solved message via `scale_solved_msg` | same as balance_gate |
 | nowruz_quiz | quiz hall: separates the Shahnameh myth from UN/UNESCO facts | `hall` |
 | kaveh_quiz | quiz hall (3 questions from the narrative) | `hall` |

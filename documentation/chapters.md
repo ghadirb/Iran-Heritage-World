@@ -15,6 +15,7 @@ The first screen therefore stays short however many levels exist.
 | `jamshid_nowruz` فصل ۵ | 21–22 | Jamshid and Nowruz: Shahnameh myth separated from the UN/UNESCO documented facts; brief in `documentation/chapters/jamshid_nowruz.md` | needs editorial review, Shahnameh lines still to be recorded |
 | `cyrus_achaemenids` فصل ۶ | 23–25 | Cyrus and the Achaemenids (documented history): the Cyrus Cylinder (British Museum BM 90920) and Pasargadae; ends with a quiz that separates what the object says from what was later claimed; brief in `documentation/chapters/cyrus_achaemenids.md` | needs editorial review, sources listed in the brief |
 | `royal_road_persepolis` فصل ۷ | 26–28 | Royal Road couriers (Herodotus 5.52–53, 8.98) and Persepolis (Darius I c. 518 BC, UNESCO 1979, Apadana delegations); brief in `documentation/chapters/royal_road_persepolis.md` | needs editorial review |
+| `rostam_haft_khan` فصل ۸ | 29–32 | Rostam's Seven Labours (literary myth, Shahnameh): dragon (3rd), witch (4th), White Div cure (7th) + quiz "myth or history?"; brief in `documentation/chapters/rostam_haft_khan.md` | needs editorial review; primary-text lines not yet recorded |
 
 Mistake we made and must not repeat: after chapter 7 we kept inventing new *mechanics* (13–17) without a story,
 period or source behind them. The game drifted from its purpose (Iran, its history and myths).

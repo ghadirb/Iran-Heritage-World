@@ -28,6 +28,7 @@ var refills := 0
 var outs := 0
 var active := false
 var arrived := false
+const ITEM_COLORS := {"cylinder": [Color("#7a4a2c"), Color("#c99a64")], "gift": [Color("#8a6a1f"), Color("#e6bd4c")], "vial": [Color("#4a0f12"), Color("#b0262c")]}
 var item := "lamp"          # "lamp", "cylinder" (fragile clay cylinder) or "gift" (a golden cup carried to a gate)
 var lamp: Node3D
 var item_mat: StandardMaterial3D
@@ -137,7 +138,8 @@ func _follow(pos: Vector3, facing_y: float) -> void:
 	lamp.global_position = pos + Basis(Vector3.UP, facing_y) * Vector3(-0.42, 0.95, 0.22)
 	if item != "lamp":
 		# the object looks stressed as it loses its steadiness
-		item_mat.albedo_color = (Color("#7a4a2c") if item == "cylinder" else Color("#8a6a1f")).lerp(Color("#c99a64") if item == "cylinder" else Color("#e6bd4c"), clampf(oil, 0.0, 1.0))
+		var cols: Array = ITEM_COLORS[item]
+		item_mat.albedo_color = (cols[0] as Color).lerp(cols[1], clampf(oil, 0.0, 1.0))
 		return
 	var flicker := 1.0 + 0.07 * sin(elapsed * 17.0)
 	var k := (0.35 + 0.65 * clampf(oil, 0.0, 1.0)) * flicker
@@ -147,6 +149,12 @@ func _follow(pos: Vector3, facing_y: float) -> void:
 func _build_lamp() -> void:
 	lamp = Node3D.new()
 	lamp.name = "CaravanLamp"
+	if item == "vial":
+		item_mat = PropFactory.mat(Color("#b0262c"), 0.3, 0.2)
+		lamp.add_child(PropFactory.part(PropFactory.sphere(0.13, 12), item_mat, Vector3(0, -0.04, 0)))
+		lamp.add_child(PropFactory.part(PropFactory.cylinder(0.04, 0.05, 0.14, 8), PropFactory.mat(Color("#d8cfc0"), 0.5), Vector3(0, 0.14, 0)))
+		root.add_child(lamp)
+		return
 	if item == "gift":
 		item_mat = PropFactory.mat(Color("#e6bd4c"), 0.3, 0.6)
 		lamp.add_child(PropFactory.part(PropFactory.cylinder(0.05, 0.08, 0.1, 10), item_mat, Vector3(0, -0.16, 0)))
@@ -212,6 +220,13 @@ func _build_tower(p: Vector3) -> void:
 	var n := Node3D.new()
 	n.name = "LampTower"
 	n.position = p
+	if item == "vial":
+		# the king's tent: a wide cone of dark cloth with a gold finial
+		var cloth := PropFactory.mat(Color("#6d2a2a"), 0.95)
+		n.add_child(PropFactory.part(PropFactory.cylinder(0.05, 3.2, 3.4, 12), cloth, Vector3(0, 1.7, 0)))
+		n.add_child(PropFactory.part(PropFactory.sphere(0.25, 10), PropFactory.mat(Color("#ffd36b"), 0.2, 0.0, 2.4), Vector3(0, 3.6, 0)))
+		root.add_child(n)
+		return
 	if item == "gift":
 		# the Gate of All Nations, simplified: two tall stone columns and a lintel
 		var stone := PropFactory.mat(Color("#a79c8a"), 1.0)

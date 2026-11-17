@@ -782,12 +782,12 @@ func _update_mirror_hall(delta: float) -> void:
 	var result := mirror_hall.step(delta, player.global_position, player.is_on_floor())
 	match result:
 		"watch":
-			_msg("mirror_watch", 4.0)
+			_msg(str(level.get("mirror_msg_prefix", "mirror")) + "_watch", 4.0)
 		"solved":
 			for it in items:
 				if str((it["data"] as Dictionary)["kind"]) == "mirror_finish" and not bool(it["done"]):
 					_mark_done(it)
-			_msg("mirror_solved", 3.5)
+			_msg(str(level.get("mirror_msg_prefix", "mirror")) + "_solved", 3.5)
 			_check_finish()
 
 # ---------- sinking stones (chapter 17): crumbling stepping stones over a gorge ----------
