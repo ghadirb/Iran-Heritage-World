@@ -117,7 +117,7 @@ func _arg_value(key: String) -> String:
 			return a.substr(key.length() + 1)
 	return ""
 
-## Developer helper (also --menu=main|<chapter index> for the menus): godot --path app -- --shot=out.png --level=0 --z=-20 --yaw=0.4 [--shoot=<physics frames after firing>] [--fires=<lit braziers>]
+## Developer helper (also --menu=main|<chapter index> for the menus): godot --path app -- --shot=out.png --level=0 --z=-20 --yaw=0.4 [--shoot=<physics frames after firing>] [--fires=<lit braziers>] [--clip=<clip id> --clipframes=<frames>]
 func _run_screenshot(path: String) -> void:
 	if _arg_value("--menu") != "":
 		# dev helper: --menu=main or --menu=<chapter index>; unlocks everything in memory only (nothing is saved)
@@ -149,7 +149,17 @@ func _run_screenshot(path: String) -> void:
 			var bd: Dictionary = it["data"]
 			if str(bd["kind"]) == "brazier" and int(bd["order"]) < int(_arg_value("--fires")):
 				(it["node"] as Node3D).add_child(PropFactory.make_flame(Color(str(bd["color"]))))
-	hud.toast("آزمایش نمایش متن فارسی و رابط کاربری", 60.0)
+	if _arg_value("--clip") != "":
+		# dev helper: show a story clip (needs a display, e.g. xvfb) and capture it a little later
+		hud.show_cutscene(_arg_value("--clip"), Callable(), true)
+		for _i in range(int(_arg_value("--clipframes")) if _arg_value("--clipframes") != "" else 150):
+			await get_tree().process_frame
+		get_viewport().get_texture().get_image().save_png(path)
+		print("saved ", path)
+		get_tree().quit()
+		return
+	else:
+		hud.toast("آزمایش نمایش متن فارسی و رابط کاربری", 60.0)
 	for _i in range(90):
 		await get_tree().process_frame
 	if _arg_value("--shoot") != "" and not targets.is_empty():
@@ -310,9 +320,20 @@ func load_level(index: int, announce: bool = true) -> void:
 	var voice_keys: Array = [objective_key]
 	if announce:
 		voice_keys = [intro_key, lid + "__" + str(level.get("intro_extra_key", "intro_extra")), objective_key] if level.has("intro_extra") else [intro_key, objective_key]
-	hud.set_level_voice(voice_keys)
+	var clip_first := announce and not selftest and str(level.get("cutscene_before", "")) != "" and not GameState.seen_cutscenes.has(str(level.get("cutscene_before", "")))
+	if not clip_first:
+		hud.set_level_voice(voice_keys)
 	if announce:
-		hud.toast((str(level["intro"]) + " " + str(level.get("intro_extra", ""))).strip_edges(), 8.0)
+		var intro_text := (str(level["intro"]) + " " + str(level.get("intro_extra", ""))).strip_edges()
+		var clip := str(level.get("cutscene_before", ""))
+		if clip_first:
+			# the clip plays first; the toast and the level narration come afterwards
+			hud.set_level_voice([])
+			hud.show_cutscene(clip, func() -> void:
+				hud.set_level_voice(voice_keys)
+				hud.toast(intro_text, 8.0))
+		else:
+			hud.toast(intro_text, 8.0)
 
 # ---------- environment ----------
 
@@ -1400,7 +1421,12 @@ func _finish_level() -> void:
 	var k: Dictionary = level["knowledge"]
 	GameState.complete_level(level_index, stars, str(k["id"]))
 	var has_next := level_index + 1 < LevelData.LEVELS.size()
-	hud.show_level_complete(level, stars, has_next, func() -> void: load_level(level_index + 1))
+	var show_complete := func() -> void: hud.show_level_complete(level, stars, has_next, func() -> void: load_level(level_index + 1))
+	var after_clip := str(level.get("cutscene_after", ""))
+	if after_clip != "" and not selftest and not GameState.seen_cutscenes.has(after_clip):
+		hud.show_cutscene(after_clip, show_complete)
+	else:
+		show_complete.call()
 
 # ---------- per-frame ----------
 
@@ -1505,6 +1531,16 @@ func _run_selftest() -> void:
 	var failures := 0
 	_report_missing_voice()
 	failures += _selftest_chapters()
+	# story clips: every clip file must load and every level reference must exist
+	for cid in CutsceneData.CLIPS.keys():
+		if not CutsceneData.is_valid(str(cid)):
+			print("  cutscene file missing or not a video stream: %s" % str(cid))
+			failures += 1
+	for lv in LevelData.LEVELS:
+		for key in ["cutscene_before", "cutscene_after"]:
+			if str(lv.get(key, "")) != "" and not CutsceneData.has_clip(str(lv[key])):
+				print("  level %s references unknown clip %s" % [str(lv["id"]), str(lv[key])])
+				failures += 1
 	# developer filters: --only=<level index>  --diff=<0..2>
 	var only := int(_arg_value("--only")) if _arg_value("--only") != "" else -1
 	var only_diff := int(_arg_value("--diff")) if _arg_value("--diff") != "" else -1

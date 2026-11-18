@@ -287,6 +287,78 @@ func selftest_modal_fits() -> bool:
 	var h := (scrolls[0] as ScrollContainer).custom_minimum_size.y
 	return h > 100.0 and h <= get_viewport().get_visible_rect().size.y * 0.9
 
+## Full-screen story clip. `then` runs when it ends or is skipped. Without a usable clip (feature off,
+## test run, missing file) `then` runs immediately.
+func show_cutscene(id: String, then: Callable = Callable(), force: bool = false) -> void:
+	var usable := CutsceneData.has_clip(id) and (force or GameState.cutscenes_on) and DisplayServer.get_name() != "headless" and CutsceneData.is_valid(id)
+	if not usable:
+		if then.is_valid():
+			then.call()
+		return
+	var info: Dictionary = CutsceneData.CLIPS[id]
+	var dim := ColorRect.new()
+	dim.color = Color.BLACK
+	dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	dim.mouse_filter = Control.MOUSE_FILTER_STOP
+	modal_layer.add_child(dim)
+	var ratio := AspectRatioContainer.new()
+	ratio.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	ratio.ratio = 16.0 / 9.0
+	ratio.stretch_mode = AspectRatioContainer.STRETCH_FIT
+	dim.add_child(ratio)
+	var video := VideoStreamPlayer.new()
+	video.stream = load(CutsceneData.path_of(id)) as VideoStream
+	video.expand = true
+	video.volume_db = linear_to_db(clampf(GameState.music_volume + 0.3, 0.3, 1.0))
+	ratio.add_child(video)
+	var caption := _label(str(info["caption"]), 16, Color(1, 1, 1, 0.9), false, HORIZONTAL_ALIGNMENT_CENTER)
+	caption.set_anchors_and_offsets_preset(Control.PRESET_CENTER_BOTTOM)
+	caption.offset_top = -44
+	caption.offset_bottom = -8
+	caption.offset_left = -400
+	caption.offset_right = 400
+	dim.add_child(caption)
+	var skip := _button("رد کردن ▸", func() -> void: pass, Vector2(150, 48))
+	skip.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT)
+	skip.offset_left = -170
+	skip.offset_right = -20
+	skip.offset_top = 16
+	skip.offset_bottom = 64
+	dim.add_child(skip)
+	modal_stack.append(dim)
+	_sync_block()
+	AudioManager.stop_voice()
+	AudioManager.clip_playing = true
+	var done := func() -> void:
+		if not is_instance_valid(dim) or not modal_stack.has(dim):
+			return
+		modal_stack.erase(dim)
+		dim.queue_free()
+		AudioManager.clip_playing = false
+		GameState.mark_cutscene_seen(id)
+		_sync_block()
+		if then.is_valid():
+			then.call()
+	video.finished.connect(done)
+	skip.pressed.connect(done)
+	# start one frame later: playing in the same frame the player enters the tree ends it immediately
+	get_tree().process_frame.connect(video.play, CONNECT_ONE_SHOT)
+## "کلیپ‌های داستان": watch any clip again (also works when clips are switched off).
+func show_cutscene_list(back: Callable = Callable()) -> void:
+	if not back.is_valid():
+		back = show_main_menu
+	close_all_modals()
+	var box := _open_modal(460)
+	box.add_child(_label("کلیپ‌های داستان", 28, Color(0.45, 0.25, 0.08), true, HORIZONTAL_ALIGNMENT_CENTER))
+	for cid in CutsceneData.ORDER:
+		var clip_id: String = cid
+		box.add_child(_button("▶ " + str((CutsceneData.CLIPS[clip_id] as Dictionary)["title"]), func() -> void:
+			close_all_modals()
+			show_cutscene(clip_id, func() -> void: show_cutscene_list(back), true), Vector2(380, 54)))
+	box.add_child(_button("بازگشت", func() -> void:
+		close_all_modals()
+		back.call(), Vector2(380, 54)))
+
 func close_top_modal() -> void:
 	if modal_stack.is_empty():
 		return
@@ -543,6 +615,12 @@ func show_settings(back: Callable = Callable()) -> void:
 		toast("سختی از شروع بعدی مرحله (یا «شروع دوباره مرحله») اعمال می‌شود.", 4.0))
 	box.add_child(db)
 	_add_quality_controls(box)
+	var cb := _button("کلیپ‌های داستان: " + ("روشن" if GameState.cutscenes_on else "خاموش"), func() -> void: pass, Vector2(380, 54))
+	cb.pressed.connect(func() -> void:
+		GameState.set_cutscenes_on(not GameState.cutscenes_on)
+		cb.text = "کلیپ‌های داستان: " + ("روشن" if GameState.cutscenes_on else "خاموش"))
+	box.add_child(cb)
+	box.add_child(_button("تماشای کلیپ‌ها", func() -> void: show_cutscene_list(func() -> void: show_settings(back)), Vector2(380, 54)))
 	box.add_child(_button("تنظیمات صدا", func() -> void: show_audio_settings(back), Vector2(380, 54)))
 	# The settings modal is still open here; the target menu (e.g. the pause menu) refuses to open on
 	# top of another modal, which made "بازگشت" do nothing. Close it first.

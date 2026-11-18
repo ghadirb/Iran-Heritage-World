@@ -122,6 +122,7 @@ const LEVELS: Array[Dictionary] = [
 	{
 		"id": "alborz_foothills",
 		"chapter": "zal_simorgh",
+		"cutscene_before": "zal_nest",
 		"audio": {"music": 0.55, "wind": 0.30, "water": 1.0},
 		"title": "دامنه البرز",
 		"subtitle": "مرحله ۱ • ردّ آشیانه",
@@ -177,6 +178,7 @@ const LEVELS: Array[Dictionary] = [
 	{
 		"id": "simorgh_nest",
 		"chapter": "zal_simorgh",
+		"cutscene_before": "simorgh_flight", "cutscene_after": "simorgh_feather",
 		"audio": {"music": 0.60, "wind": 0.85, "water": 0.0},
 		"title": "آشیانه سیمرغ",
 		"subtitle": "مرحله ۳ • آتش‌های نشان‌دار",

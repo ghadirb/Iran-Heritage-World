@@ -25,6 +25,7 @@ var _music_now := 0.0
 var _wind_now := 0.0
 var _water_now := 0.0
 var _duck := 1.0
+var clip_playing := false   # a story clip has its own sound: silence music, ambience and narration meanwhile
 var _voice_queue: Array[String] = []
 
 func _ready() -> void:
@@ -84,15 +85,15 @@ func update_ambience(level: Dictionary, wind_height: float, river_distance: floa
 		_water_target = 0.0
 
 func _process(delta: float) -> void:
-	var duck_target := 0.35 if voice.playing else 1.0
+	var duck_target := 0.0 if clip_playing else (0.35 if voice.playing else 1.0)
 	_duck = move_toward(_duck, duck_target, delta * 1.5)
 	var k := clampf(delta * 1.2, 0.0, 1.0)
 	_music_now = lerpf(_music_now, _music_target, k)
 	_wind_now = lerpf(_wind_now, _wind_target, k)
 	_water_now = lerpf(_water_now, _water_target, k)
 	_apply(music, _music_now * _duck * GameState.music_volume * 0.55)
-	_apply(wind, _wind_now * GameState.ambience_volume * 0.6)
-	_apply(water, _water_now * GameState.ambience_volume * 0.7)
+	_apply(wind, _wind_now * GameState.ambience_volume * 0.6 * (0.0 if clip_playing else 1.0))
+	_apply(water, _water_now * GameState.ambience_volume * 0.7 * (0.0 if clip_playing else 1.0))
 	voice.volume_db = 0.0
 
 func _apply(p: AudioStreamPlayer, linear: float) -> void:

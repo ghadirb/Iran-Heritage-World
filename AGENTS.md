@@ -133,6 +133,9 @@ three difficulty knobs stay in `DifficultyRules`. Every new mechanic
 needs a headless bot/test in `--selftest` (see `_selftest_bridge`, `_selftest_logs`) and a `--jumptest`-style check
 when it affects reachability.
 
+## Story clips
+See `documentation/cutscenes.md`. Godot 4 plays only Ogg Theora: run `python3 tools/convert_video.py`; clips are registered in `cutscene_data.gd` and attached to levels with `cutscene_before` / `cutscene_after`. Do not play clips in `--selftest`.
+
 ## Pitfalls found by looking at real screenshots
 - `Basis.scaled()` scales in WORLD space; to stretch a mesh along its own axis use `basis * Basis.from_scale(...)` (the mirror beams were tall vertical slabs because of this).
 - Additive-blended or strongly emissive colours turn white against the bright daytime sky; use alpha blending and saturated albedo so colour puzzles (fire order) stay readable.

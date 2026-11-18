@@ -22,6 +22,8 @@ var ambience_volume := 0.8           # wind + water
 var voice_mode := 2                  # 0 off, 1 manual button, 2 automatic (default)
 var voice_chosen := false            # true once the player changed it in settings
 var difficulty := 1                  # 0 easy, 1 medium, 2 challenge (see DifficultyRules)
+var cutscenes_on := true             # story clips can be switched off (weak phones, impatient players)
+var seen_cutscenes: Array = []       # clip ids already shown automatically once
 var quality_saved := false           # false on first run -> pick a safe default
 const GUARD_PATH := "user://loading.flag"
 var safe_mode_triggered := false
@@ -103,6 +105,8 @@ func load_game() -> void:
 	voice_mode = clampi(int(data.get("voice_mode", 2)), 0, 2) if voice_chosen else 2
 	shadows = bool(data.get("shadows", false))
 	difficulty = clampi(int(data.get("difficulty", 1)), 0, 2)
+	cutscenes_on = bool(data.get("cutscenes_on", true))
+	seen_cutscenes = data.get("seen_cutscenes", []) as Array
 
 func save_game() -> void:
 	var file := FileAccess.open(SAVE_PATH, FileAccess.WRITE)
@@ -116,6 +120,8 @@ func save_game() -> void:
 		"shadows": shadows,
 		"ui_scale": ui_scale_index,
 		"difficulty": difficulty,
+		"cutscenes_on": cutscenes_on,
+		"seen_cutscenes": seen_cutscenes,
 		"music_volume": music_volume,
 		"ambience_volume": ambience_volume,
 		"voice_mode": voice_mode,
@@ -129,6 +135,15 @@ func complete_level(index: int, star_count: int, knowledge_id: String) -> void:
 	if knowledge_id != "" and not knowledge.has(knowledge_id):
 		knowledge.append(knowledge_id)
 	save_game()
+
+func set_cutscenes_on(value: bool) -> void:
+	cutscenes_on = value
+	save_game()
+
+func mark_cutscene_seen(id: String) -> void:
+	if not seen_cutscenes.has(id):
+		seen_cutscenes.append(id)
+		save_game()
 
 func set_difficulty(value: int) -> void:
 	difficulty = clampi(value, 0, 2)
