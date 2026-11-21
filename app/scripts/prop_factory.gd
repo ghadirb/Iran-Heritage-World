@@ -423,6 +423,31 @@ static func make_trunk() -> Node3D:
 		root.add_child(part(box(Vector3(0.5, 0.08, 0.1)), mat(Color("#4a3320"), 1.0), Vector3(-0.8 + 0.8 * float(k), 0.5, 0.0)))
 	return root
 
+## A simple low-poly horse (+Z is forward). `spots` adds red dapples (Rakhsh: "rose petals on saffron").
+static func make_horse(coat: Color, spots: bool = false) -> Node3D:
+	var root := Node3D.new()
+	var body_mat := mat(coat, 0.8, 0.0, 0.35 if spots else 0.0)
+	var dark := mat(coat.darkened(0.45), 0.9)
+	root.add_child(part(sphere(0.5, 12), body_mat, Vector3(0, 1.15, 0), Vector3(0.85, 0.9, 1.9)))
+	var neck := part(cylinder(0.16, 0.26, 0.9, 8), body_mat, Vector3(0, 1.65, 0.85))
+	neck.rotation.x = -0.6
+	root.add_child(neck)
+	root.add_child(part(box(Vector3(0.26, 0.28, 0.6)), body_mat, Vector3(0, 1.95, 1.3)))
+	root.add_child(part(box(Vector3(0.08, 0.3, 0.7)), dark, Vector3(0, 1.85, 0.95)))   # mane
+	for lx in [-0.28, 0.28]:
+		for lz in [-0.7, 0.7]:
+			root.add_child(part(cylinder(0.07, 0.09, 1.0, 6), dark, Vector3(lx, 0.5, lz)))
+	var tail := part(cylinder(0.04, 0.09, 0.8, 6), dark, Vector3(0, 1.1, -1.05))
+	tail.rotation.x = 0.7
+	root.add_child(tail)
+	if spots:
+		var red := mat(Color("#c2362e"), 0.7, 0.0, 0.4)
+		for sp in [Vector3(0.38, 1.3, 0.4), Vector3(-0.38, 1.2, -0.2), Vector3(0.36, 1.05, -0.5), Vector3(-0.36, 1.4, 0.5), Vector3(0.0, 1.62, -0.1)]:
+			var dot := part(sphere(0.13, 6), red, sp, Vector3(1, 1, 0.5))
+			dot.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+			root.add_child(dot)
+	return root
+
 ## A carried building stone (levels with "carry_visual": "stone") and the footing it is placed on.
 static func make_stone_block() -> Node3D:
 	var root := Node3D.new()

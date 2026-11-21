@@ -36,6 +36,10 @@ const STONE_SPACING := [3.4, 3.9, 4.3]       # centre-to-centre distance of the 
 const STONE_RADIUS := [1.5, 1.3, 1.15]
 const STONE_HOLD := [1.0, 0.7, 0.5]           # seconds from the first step until the stone drops
 const STONE_DOWN := [3.0, 4.0, 4.5]           # seconds a dropped stone stays away
+const LASSO_COUNT := [5, 7, 9]
+const LASSO_SPEED := [2.6, 3.6, 4.6]          # m/s of the herd
+const LASSO_RANGE := [12.0, 10.0, 8.5]        # how far the lasso reaches
+const LASSO_CONE := [34.0, 28.0, 22.0]        # half-angle in front of the courier (degrees)
 const WIND_COUNT := [3, 4, 5]
 const WIND_SPEED := [0.85, 1.15, 1.45]
 const WIND_SWEEP := [8.0, 10.0, 12.0]
@@ -110,6 +114,7 @@ static func apply(src: Dictionary, d: int) -> Dictionary:
 	_apply_night_watch(lv, d)
 	_apply_ice_lake(lv, d)
 	_apply_sinking_stones(lv, d)
+	_apply_lasso(lv, d)
 	_apply_light(lv, d)
 	return lv
 
@@ -200,6 +205,16 @@ static func _apply_sinking_stones(lv: Dictionary, d: int) -> void:
 	s["radius"] = STONE_RADIUS[d]
 	s["hold"] = STONE_HOLD[d]
 	s["down_time"] = STONE_DOWN[d]
+
+## Same meadow: a bigger, faster herd and a shorter, narrower throw.
+static func _apply_lasso(lv: Dictionary, d: int) -> void:
+	if not lv.has("lasso"):
+		return
+	var l: Dictionary = lv["lasso"]
+	l["count"] = LASSO_COUNT[d]
+	l["speed"] = LASSO_SPEED[d]
+	l["range"] = LASSO_RANGE[d]
+	l["cone"] = LASSO_CONE[d]
 
 ## Same hall: one, two or three mirrors in the chain (each difficulty has its own layout in the level data).
 static func _apply_light(lv: Dictionary, d: int) -> void:

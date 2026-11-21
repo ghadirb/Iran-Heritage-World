@@ -17,6 +17,7 @@ The first screen therefore stays short however many levels exist.
 | `royal_road_persepolis` فصل ۷ | 26–28 | Royal Road couriers (Herodotus 5.52–53, 8.98) and Persepolis (Darius I c. 518 BC, UNESCO 1979, Apadana delegations); brief in `documentation/chapters/royal_road_persepolis.md` | needs editorial review |
 | `rostam_haft_khan` فصل ۸ | 29–32 | Rostam's Seven Labours (literary myth, Shahnameh): dragon (3rd), witch (4th), White Div cure (7th) + quiz "myth or history?"; brief in `documentation/chapters/rostam_haft_khan.md` | needs editorial review; primary-text lines not yet recorded |
 | `darius_behistun` فصل ۹ | 33–35 | Darius I and the Behistun Inscription (documented history; UNESCO 2006; trilingual; Rawlinson); quiz stresses it is the king's own account; brief in `documentation/chapters/darius_behistun.md` | needs editorial review |
+| `rostam_rakhsh` فصل ۱۰ | 36–37 | Rostam chooses Rakhsh with a lasso (literary myth; Smithsonian, FEZANA, Wikipedia); first level with the new **lasso** mechanic; brief in `documentation/chapters/rostam_rakhsh.md` | needs editorial review; Shahnameh lines not yet recorded |
 
 Mistake we made and must not repeat: after chapter 7 we kept inventing new *mechanics* (13–17) without a story,
 period or source behind them. The game drifted from its purpose (Iran, its history and myths).

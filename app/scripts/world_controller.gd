@@ -67,6 +67,7 @@ var mirror_hall: MirrorHallController
 var night_watch: NightWatchController
 var ice_lake: IceLakeController
 var sinking_stones: SinkingStonesController
+var lasso: LassoController
 var stones_msg_shown := false
 var base_acceleration := 28.0
 
@@ -222,6 +223,8 @@ func load_level(index: int, announce: bool = true) -> void:
 	night_watch = null
 	ice_lake = null
 	sinking_stones = null
+	lasso = null
+	hud.set_interact_text("تعامل")
 	stones_msg_shown = false
 	player.acceleration = base_acceleration
 	shoot_cooldown = 0.0
@@ -275,6 +278,8 @@ func load_level(index: int, announce: bool = true) -> void:
 		_build_ice_lake()
 	if level.has("sinking_stones"):
 		_build_sinking_stones()
+	if level.has("lasso"):
+		_build_lasso()
 	_setup_bow()
 	_build_ambient_particles()
 	var sp: Vector2 = level["spawn"]
@@ -304,6 +309,8 @@ func load_level(index: int, announce: bool = true) -> void:
 		ice_lake.reset()
 	if sinking_stones:
 		sinking_stones.reset()
+	if lasso:
+		lasso.reset()
 		stones_msg_shown = false
 	player.input_enabled = true
 	hud.close_all_modals()
@@ -811,6 +818,36 @@ func _update_mirror_hall(delta: float) -> void:
 			_msg(str(level.get("mirror_msg_prefix", "mirror")) + "_solved", 3.5)
 			_check_finish()
 
+# ---------- lasso (chapter 10): choose Rakhsh from a running herd ----------
+
+func _build_lasso() -> void:
+	lasso = LassoController.new()
+	lasso.build(level_root, terrain, level)
+	hud.set_interact_text("کمند")
+	_msg("lasso_start", 6.0)
+
+func _update_lasso(delta: float) -> void:
+	if lasso == null:
+		return
+	lasso.step(delta, player.global_position, player.art.rotation.y)
+
+func _throw_lasso() -> void:
+	if finished:
+		return
+	match lasso.throw_lasso(player.global_position, player.art.rotation.y):
+		"caught":
+			AudioManager.play_sfx("bow_shot", 0.6)
+			for it in items:
+				if str((it["data"] as Dictionary)["kind"]) == "lasso_finish" and not bool(it["done"]):
+					_mark_done(it)
+			_msg("lasso_caught", 4.0)
+			_check_finish()
+		"wrong":
+			mistakes += 1
+			_msg("lasso_wrong", 3.5)
+		"none":
+			_msg("lasso_none", 3.0)
+
 # ---------- sinking stones (chapter 17): crumbling stepping stones over a gorge ----------
 
 func _build_sinking_stones() -> void:
@@ -1039,6 +1076,7 @@ func _physics_process(delta: float) -> void:
 	_update_night_watch(delta)
 	_update_ice_lake(delta)
 	_update_sinking_stones(delta)
+	_update_lasso(delta)
 	if moving_stones.is_empty():
 		return
 	chain_time += delta
@@ -1134,7 +1172,7 @@ func _build_interactables() -> void:
 			"roll_finish":
 				node = PropFactory.make_clue_marker("clue")
 				pos += Vector3(0, 0.9, 0)
-			"turn_finish", "lamp_finish", "mosaic_finish", "mirror_finish", "watch_finish", "ice_finish", "stones_finish":
+			"turn_finish", "lamp_finish", "mosaic_finish", "mirror_finish", "watch_finish", "ice_finish", "stones_finish", "lasso_finish":
 				node = PropFactory.make_clue_marker("clue")
 				pos += Vector3(0, 0.9, 0)
 			"npc":
@@ -1207,6 +1245,9 @@ func _interact() -> void:
 	if not level_active or hud.is_modal_open():
 		return
 	var it := _nearest_item()
+	if lasso != null and (it.is_empty() or str((it["data"] as Dictionary)["kind"]) != "npc"):
+		_throw_lasso()
+		return
 	if it.is_empty():
 		_msg("nothing_to_talk", 3.0)
 		return
@@ -1655,6 +1696,8 @@ func _selftest_level(i: int) -> int:
 		failures += await _selftest_ice_lake()
 	if level.has("sinking_stones"):
 		failures += await _selftest_sinking_stones()
+	if level.has("lasso"):
+		failures += await _selftest_lasso()
 	for it in items:
 		if not bool((it["data"] as Dictionary).get("finale", false)):
 			it["done"] = true
@@ -2093,6 +2136,58 @@ func _selftest_mosaic() -> int:
 ## Standing in a beam must get the courier caught, shade must be safe, and a careful bot (waits in the shade
 ## until the way to the next awning is clear, with real physics) must reach the last station.
 ## A stone must crumble once stepped on (and come back), and a jumping bot must cross with the real physics.
+## Throwing at another horse must only release it (a mistake, never a catch); a bot that chases Rakhsh and
+## throws with the real movement physics must catch him.
+func _selftest_lasso() -> int:
+	var ls := lasso
+	if ls == null or ls.horses.size() < 3:
+		print("  lasso: controller missing")
+		return 1
+	# 1) a wrong horse: stand next to the first non-Rakhsh horse, face it and throw
+	var other: Dictionary = {}
+	for h in ls.horses:
+		if not bool(h["rakhsh"]):
+			other = h
+			break
+	ls.reset()
+	var on: Node3D = other["node"]
+	player.global_position = on.global_position + Vector3(-4.0, 0.6, 0.0)
+	player.velocity = Vector3.ZERO
+	player.art.rotation.y = PI * 0.5
+	var first := ls.throw_lasso(player.global_position, player.art.rotation.y)
+	var wrong_ok := first == "wrong" and not ls.caught and ls.wrong == 1
+	# 2) a throw with nothing in the cone does nothing
+	ls.cooldown = 0.0
+	player.art.rotation.y = -PI * 0.5
+	player.global_position = Vector3(on.global_position.x + 60.0, 0.6, on.global_position.z)
+	var none_ok := ls.throw_lasso(player.global_position, player.art.rotation.y) == "none"
+	# 3) the chasing bot
+	ls.reset()
+	player.global_position = spawn_point
+	player.velocity = Vector3.ZERO
+	var frames := 0
+	for _frame in range(4000):
+		frames += 1
+		if ls.caught:
+			break
+		var rk: Dictionary = ls.rakhsh()
+		var target: Vector3 = (rk["node"] as Node3D).global_position
+		var d := Vector2(target.x - player.global_position.x, target.z - player.global_position.z)
+		if d.length() > ls.throw_range * 0.55:
+			GameState.move_vector = d.normalized()
+		else:
+			GameState.move_vector = d.normalized() * 0.15   # slow down, keep facing him
+			if ls.cooldown <= 0.0 and player.is_on_floor():
+				_throw_lasso()
+		await get_tree().physics_frame
+	GameState.move_vector = Vector2.ZERO
+	var finish_done := false
+	for it in items:
+		if str((it["data"] as Dictionary)["kind"]) == "lasso_finish":
+			finish_done = bool(it["done"])
+	print("  lasso: difficulty=%d horses=%d caught=%s finish=%s wrong_release=%s none_throw=%s throws=%d frames=%d" % [GameState.difficulty, ls.horses.size(), ls.caught, finish_done, wrong_ok, none_ok, ls.throws, frames])
+	return 0 if (ls.caught and finish_done and wrong_ok and none_ok) else 1
+
 func _selftest_sinking_stones() -> int:
 	var ss := sinking_stones
 	if ss == null or ss.tiles.is_empty():

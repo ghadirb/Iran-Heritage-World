@@ -19,6 +19,7 @@ var enabled := true:
 		if not enabled:
 			_release_all()
 		queue_redraw()
+var interact_text := "تعامل"   # levels may re-label the button ("کمند" in the lasso level)
 var interact_ready := false:
 	set(value):
 		if value != interact_ready:
@@ -143,7 +144,7 @@ func _draw() -> void:
 	draw_circle(knob, 38.0, Color(1.0, 0.86, 0.55, 0.62 if _stick_id != -1 else 0.38))
 	# action buttons
 	_draw_button("jump", Color(0.2, 0.28, 0.3, 0.6), "پرش")
-	_draw_button("interact", Color(0.88, 0.62, 0.2, 0.9) if interact_ready else Color(0.2, 0.28, 0.3, 0.6), "تعامل")
+	_draw_button("interact", Color(0.88, 0.62, 0.2, 0.9) if interact_ready else Color(0.2, 0.28, 0.3, 0.6), interact_text)
 	if archery:
 		_draw_button("shoot", Color(0.75, 0.3, 0.2, 0.9), "تیر")
 		var c := size * 0.5

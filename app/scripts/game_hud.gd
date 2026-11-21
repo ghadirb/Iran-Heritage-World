@@ -228,6 +228,10 @@ func toast(text: String, seconds: float = 4.5) -> void:
 func set_archery(on: bool) -> void:
 	touch.archery = on
 
+func set_interact_text(text: String) -> void:
+	touch.interact_text = text
+	touch.queue_redraw()
+
 func set_interact_ready(value: bool) -> void:
 	touch.interact_ready = value
 

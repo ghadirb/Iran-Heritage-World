@@ -44,6 +44,8 @@ Mechanics already in the game (reuse before inventing):
 | behistun_panels | **carry** re-themed to panels (`carry_visual: "stone"`, `carry_msg_prefix: "panel"`), three places in the order Elamite, Babylonian, Old Persian | same as simorgh_nest |
 | behistun_cliff | **sinking stones** re-themed (`stones_start_msg: cliff_start`, `water: false`) | same as sinking_stones |
 | darius_quiz | quiz hall (4 questions) | `hall` |
+| rakhsh_herd | **lasso** (new): a herd runs across a meadow; face a horse in range and press the interact button (re-labelled "کمند"); only Rakhsh (saffron + red dapples) is kept, others are released (mistake). Data key `lasso`, difficulty in `DifficultyRules` | `lasso_controller.gd`, `_update_lasso`, `_selftest_lasso` |
+| rakhsh_quiz | quiz hall (3 questions) | `hall` |
 | nowruz_equinox | balance scale re-themed (equal day and night); own solved message via `scale_solved_msg` | same as balance_gate |
 | nowruz_quiz | quiz hall: separates the Shahnameh myth from UN/UNESCO facts | `hall` |
 | kaveh_quiz | quiz hall (3 questions from the narrative) | `hall` |
