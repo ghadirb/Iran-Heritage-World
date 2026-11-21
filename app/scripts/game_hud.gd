@@ -311,13 +311,39 @@ func show_cutscene(id: String, then: Callable = Callable(), force: bool = false)
 	video.expand = true
 	video.volume_db = linear_to_db(clampf(GameState.music_volume + 0.3, 0.3, 1.0))
 	ratio.add_child(video)
-	var caption := _label(str(info["caption"]), 16, Color(1, 1, 1, 0.9), false, HORIZONTAL_ALIGNMENT_CENTER)
-	caption.set_anchors_and_offsets_preset(Control.PRESET_CENTER_BOTTOM)
-	caption.offset_top = -44
-	caption.offset_bottom = -8
-	caption.offset_left = -400
-	caption.offset_right = 400
+	# small disclaimer at the top-left, narration subtitles at the bottom
+	var caption := _label(str(info["caption"]), 14, Color(1, 1, 1, 0.75), false, HORIZONTAL_ALIGNMENT_LEFT)
+	caption.set_anchors_and_offsets_preset(Control.PRESET_TOP_LEFT)
+	caption.offset_left = 18
+	caption.offset_top = 16
+	caption.offset_right = 560
+	caption.offset_bottom = 44
+	caption.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.9))
+	caption.add_theme_constant_override("outline_size", 5)
 	dim.add_child(caption)
+	var sub_panel := PanelContainer.new()
+	sub_panel.add_theme_stylebox_override("panel", _style(Color(0, 0, 0, 0.62), 12))
+	sub_panel.set_anchors_and_offsets_preset(Control.PRESET_CENTER_BOTTOM)
+	sub_panel.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	sub_panel.grow_vertical = Control.GROW_DIRECTION_BEGIN
+	sub_panel.offset_bottom = -22
+	sub_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var sub_label := _label("", 22, Color(1, 1, 1, 1), false, HORIZONTAL_ALIGNMENT_CENTER)
+	sub_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	sub_label.custom_minimum_size = Vector2(clampf(get_viewport().get_visible_rect().size.x * 0.82, 360.0, 1100.0), 0)
+	sub_panel.add_child(sub_label)
+	sub_panel.visible = false
+	dim.add_child(sub_panel)
+	var update_subs := func() -> void:
+		if not is_instance_valid(video) or not is_instance_valid(sub_label):
+			return
+		var line := CutsceneData.subtitle_at(id, video.stream_position)
+		sub_label.text = line
+		sub_panel.visible = line != ""
+	get_tree().process_frame.connect(update_subs)
+	dim.tree_exiting.connect(func() -> void:
+		if get_tree().process_frame.is_connected(update_subs):
+			get_tree().process_frame.disconnect(update_subs))
 	var skip := _button("رد کردن ▸", func() -> void: pass, Vector2(150, 48))
 	skip.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT)
 	skip.offset_left = -170

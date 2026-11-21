@@ -178,7 +178,7 @@ const LEVELS: Array[Dictionary] = [
 	{
 		"id": "simorgh_nest",
 		"chapter": "zal_simorgh",
-		"cutscene_before": "simorgh_flight", "cutscene_after": "simorgh_feather",
+		"cutscene_before": "simorgh_flight",
 		"audio": {"music": 0.60, "wind": 0.85, "water": 0.0},
 		"title": "آشیانه سیمرغ",
 		"subtitle": "مرحله ۳ • آتش‌های نشان‌دار",
@@ -218,6 +218,7 @@ const LEVELS: Array[Dictionary] = [
 	{
 		"id": "return_to_plain",
 		"chapter": "zal_simorgh",
+		"cutscene_after": "simorgh_feather",
 		"audio": {"music": 0.50, "wind": 0.30, "water": 0.9},
 		"title": "بازگشت به دشت",
 		"subtitle": "مرحله ۴ • درفش‌های کاروان",

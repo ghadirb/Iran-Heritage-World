@@ -1536,6 +1536,9 @@ func _run_selftest() -> void:
 		if not CutsceneData.is_valid(str(cid)):
 			print("  cutscene file missing or not a video stream: %s" % str(cid))
 			failures += 1
+		if not CutsceneData.subtitles_ok(str(cid)):
+			print("  cutscene subtitles are not ordered / empty: %s" % str(cid))
+			failures += 1
 	for lv in LevelData.LEVELS:
 		for key in ["cutscene_before", "cutscene_after"]:
 			if str(lv.get(key, "")) != "" and not CutsceneData.has_clip(str(lv[key])):
