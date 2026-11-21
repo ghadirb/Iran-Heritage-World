@@ -41,6 +41,9 @@ Mechanics already in the game (reuse before inventing):
 | haft_khan_witch | **mirror hall** re-themed (`mirror_msg_prefix: "witch"`) | same as mirror_hall |
 | haft_khan_div | **calm carry** re-themed (`item: "vial"`, `lamp_msg_prefix: "vial"`): phial to the king's tent | same as caravan_lamp |
 | rostam_quiz | quiz hall (4 questions: myth vs history) | `hall` |
+| behistun_panels | **carry** re-themed to panels (`carry_visual: "stone"`, `carry_msg_prefix: "panel"`), three places in the order Elamite, Babylonian, Old Persian | same as simorgh_nest |
+| behistun_cliff | **sinking stones** re-themed (`stones_start_msg: cliff_start`, `water: false`) | same as sinking_stones |
+| darius_quiz | quiz hall (4 questions) | `hall` |
 | nowruz_equinox | balance scale re-themed (equal day and night); own solved message via `scale_solved_msg` | same as balance_gate |
 | nowruz_quiz | quiz hall: separates the Shahnameh myth from UN/UNESCO facts | `hall` |
 | kaveh_quiz | quiz hall (3 questions from the narrative) | `hall` |
