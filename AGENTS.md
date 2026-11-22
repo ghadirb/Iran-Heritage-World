@@ -46,6 +46,9 @@ Mechanics already in the game (reuse before inventing):
 | darius_quiz | quiz hall (4 questions) | `hall` |
 | rakhsh_herd | **lasso** (new): a herd runs across a meadow; face a horse in range and press the interact button (re-labelled "کمند"); only Rakhsh (saffron + red dapples) is kept, others are released (mistake). Data key `lasso`, difficulty in `DifficultyRules` | `lasso_controller.gd`, `_update_lasso`, `_selftest_lasso` |
 | rakhsh_quiz | quiz hall (3 questions) | `hall` |
+| haft_khan_lion | **guard** (new): lions circle a sleeping hero and charge; run into a charging lion to make it back off; enough repelled = done; a lion that reaches him only startles him (mistake). Data key `guard` | `guard_controller.gd`, `_update_guard`, `_selftest_guard` |
+| haft_khan_desert | **follow** (new): a ram leads to a spring and waits when you lag; blue mirages off the path vanish if entered (mistake). Data key `follow` | `follow_controller.gd`, `_update_follow`, `_selftest_follow` |
+| haft_khan_quiz | quiz hall (3 questions) | `hall` |
 | nowruz_equinox | balance scale re-themed (equal day and night); own solved message via `scale_solved_msg` | same as balance_gate |
 | nowruz_quiz | quiz hall: separates the Shahnameh myth from UN/UNESCO facts | `hall` |
 | kaveh_quiz | quiz hall (3 questions from the narrative) | `hall` |

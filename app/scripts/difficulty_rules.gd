@@ -40,6 +40,13 @@ const LASSO_COUNT := [5, 7, 9]
 const LASSO_SPEED := [2.6, 3.6, 4.6]          # m/s of the herd
 const LASSO_RANGE := [12.0, 10.0, 8.5]        # how far the lasso reaches
 const LASSO_CONE := [34.0, 28.0, 22.0]        # half-angle in front of the courier (degrees)
+const GUARD_COUNT := [1, 2, 3]
+const GUARD_NEED := [3, 4, 6]               # lions to drive back
+const GUARD_DASH := [4.0, 5.0, 5.8]          # charge speed (the courier runs 6.2)
+const GUARD_INTERVAL := [5.0, 4.0, 3.2]      # seconds between charges
+const FOLLOW_SPEED := [3.2, 4.0, 4.8]
+const FOLLOW_WAIT := [16.0, 13.0, 10.0]      # the ram waits when you are farther than this
+const FOLLOW_MIRAGES := [[12.0, 11.0], [10.0, 9.0, 10.0], [8.0, 8.0, 9.0, 8.0]]
 const WIND_COUNT := [3, 4, 5]
 const WIND_SPEED := [0.85, 1.15, 1.45]
 const WIND_SWEEP := [8.0, 10.0, 12.0]
@@ -115,6 +122,8 @@ static func apply(src: Dictionary, d: int) -> Dictionary:
 	_apply_ice_lake(lv, d)
 	_apply_sinking_stones(lv, d)
 	_apply_lasso(lv, d)
+	_apply_guard(lv, d)
+	_apply_follow(lv, d)
 	_apply_light(lv, d)
 	return lv
 
@@ -215,6 +224,25 @@ static func _apply_lasso(lv: Dictionary, d: int) -> void:
 	l["speed"] = LASSO_SPEED[d]
 	l["range"] = LASSO_RANGE[d]
 	l["cone"] = LASSO_CONE[d]
+
+## Same reeds: more and faster lions, more charges to repel.
+static func _apply_guard(lv: Dictionary, d: int) -> void:
+	if not lv.has("guard"):
+		return
+	var g: Dictionary = lv["guard"]
+	g["count"] = GUARD_COUNT[d]
+	g["need"] = GUARD_NEED[d]
+	g["dash_speed"] = GUARD_DASH[d]
+	g["interval"] = GUARD_INTERVAL[d]
+
+## Same desert: a faster ram, a shorter leash and more mirages close to the path.
+static func _apply_follow(lv: Dictionary, d: int) -> void:
+	if not lv.has("follow"):
+		return
+	var f: Dictionary = lv["follow"]
+	f["speed"] = FOLLOW_SPEED[d]
+	f["wait_dist"] = FOLLOW_WAIT[d]
+	f["mirage_offsets"] = FOLLOW_MIRAGES[d]
 
 ## Same hall: one, two or three mirrors in the chain (each difficulty has its own layout in the level data).
 static func _apply_light(lv: Dictionary, d: int) -> void:

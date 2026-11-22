@@ -448,6 +448,45 @@ static func make_horse(coat: Color, spots: bool = false) -> Node3D:
 			root.add_child(dot)
 	return root
 
+## A low-poly lion (+Z forward): tawny body, darker mane.
+static func make_lion() -> Node3D:
+	var root := Node3D.new()
+	var fur := mat(Color("#c9964a"), 0.9)
+	var mane := mat(Color("#7a4a22"), 1.0)
+	root.add_child(part(sphere(0.5, 12), fur, Vector3(0, 0.95, 0), Vector3(0.8, 0.75, 1.7)))
+	root.add_child(part(sphere(0.52, 10), mane, Vector3(0, 1.15, 0.85)))
+	root.add_child(part(sphere(0.3, 10), fur, Vector3(0, 1.1, 1.1)))
+	for lx in [-0.25, 0.25]:
+		for lz in [-0.55, 0.55]:
+			root.add_child(part(cylinder(0.09, 0.11, 0.8, 6), fur, Vector3(lx, 0.4, lz)))
+	var tail := part(cylinder(0.04, 0.07, 0.9, 6), fur, Vector3(0, 1.0, -1.0))
+	tail.rotation.x = 0.9
+	root.add_child(tail)
+	root.add_child(part(sphere(0.1, 6), mane, Vector3(0, 1.0, -1.45)))
+	return root
+
+## A wild ram: white-grey wool, curled horns (the guide of the second labour).
+static func make_ram() -> Node3D:
+	var root := Node3D.new()
+	var wool := mat(Color("#e8e2d2"), 1.0)
+	root.add_child(part(sphere(0.5, 10), wool, Vector3(0, 0.85, 0), Vector3(0.8, 0.85, 1.3)))
+	root.add_child(part(sphere(0.25, 8), mat(Color("#cfc4ad"), 0.9), Vector3(0, 1.05, 0.7)))
+	var horn := mat(Color("#8a7a5a"), 0.8)
+	for hx in [-0.2, 0.2]:
+		root.add_child(part(sphere(0.16, 8), horn, Vector3(hx, 1.2, 0.62), Vector3(1.0, 1.0, 1.4)))
+	for lx in [-0.2, 0.2]:
+		for lz in [-0.35, 0.35]:
+			root.add_child(part(cylinder(0.05, 0.06, 0.55, 6), horn, Vector3(lx, 0.28, lz)))
+	return root
+
+## A sleeping hero: a long cloak-wrapped body with a head, lying on the ground.
+static func make_sleeper() -> Node3D:
+	var root := Node3D.new()
+	root.add_child(part(sphere(0.5, 12), mat(Color("#7a3b2a"), 0.95), Vector3(0, 0.3, 0), Vector3(0.9, 0.5, 2.0)))
+	root.add_child(part(sphere(0.22, 10), mat(Color("#e0b48c"), 0.8), Vector3(0, 0.35, 1.15)))
+	root.add_child(part(sphere(0.23, 10), mat(Color("#3a2a20"), 0.9), Vector3(0, 0.42, 1.12), Vector3(1.0, 0.7, 1.0)))
+	return root
+
 ## A carried building stone (levels with "carry_visual": "stone") and the footing it is placed on.
 static func make_stone_block() -> Node3D:
 	var root := Node3D.new()

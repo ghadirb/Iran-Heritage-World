@@ -68,6 +68,8 @@ var night_watch: NightWatchController
 var ice_lake: IceLakeController
 var sinking_stones: SinkingStonesController
 var lasso: LassoController
+var guard_ctl: GuardController
+var follow_ctl: FollowController
 var stones_msg_shown := false
 var base_acceleration := 28.0
 
@@ -224,6 +226,8 @@ func load_level(index: int, announce: bool = true) -> void:
 	ice_lake = null
 	sinking_stones = null
 	lasso = null
+	guard_ctl = null
+	follow_ctl = null
 	hud.set_interact_text("تعامل")
 	stones_msg_shown = false
 	player.acceleration = base_acceleration
@@ -280,6 +284,10 @@ func load_level(index: int, announce: bool = true) -> void:
 		_build_sinking_stones()
 	if level.has("lasso"):
 		_build_lasso()
+	if level.has("guard"):
+		_build_guard()
+	if level.has("follow"):
+		_build_follow()
 	_setup_bow()
 	_build_ambient_particles()
 	var sp: Vector2 = level["spawn"]
@@ -311,6 +319,10 @@ func load_level(index: int, announce: bool = true) -> void:
 		sinking_stones.reset()
 	if lasso:
 		lasso.reset()
+	if guard_ctl:
+		guard_ctl.reset()
+	if follow_ctl:
+		follow_ctl.reset()
 		stones_msg_shown = false
 	player.input_enabled = true
 	hud.close_all_modals()
@@ -818,6 +830,50 @@ func _update_mirror_hall(delta: float) -> void:
 			_msg(str(level.get("mirror_msg_prefix", "mirror")) + "_solved", 3.5)
 			_check_finish()
 
+# ---------- guard (chapter 11): keep the lions away from the sleeping hero ----------
+
+func _build_guard() -> void:
+	guard_ctl = GuardController.new()
+	guard_ctl.build(level_root, terrain, level)
+	_msg("guard_start", 6.0)
+
+func _update_guard(delta: float) -> void:
+	if guard_ctl == null:
+		return
+	match guard_ctl.step(delta, player.global_position):
+		"driven":
+			_msg("guard_driven", 1.5)
+		"startled":
+			mistakes += 1
+			_msg("guard_startled", 3.0)
+		"all":
+			for it in items:
+				if str((it["data"] as Dictionary)["kind"]) == "guard_finish" and not bool(it["done"]):
+					_mark_done(it)
+			_msg("guard_done", 3.5)
+			_check_finish()
+
+# ---------- follow (chapter 11): trust the ram, not the mirages ----------
+
+func _build_follow() -> void:
+	follow_ctl = FollowController.new()
+	follow_ctl.build(level_root, terrain, level)
+	_msg("follow_start", 6.0)
+
+func _update_follow(delta: float) -> void:
+	if follow_ctl == null:
+		return
+	match follow_ctl.step(delta, player.global_position):
+		"mirage":
+			mistakes += 1
+			_msg("follow_mirage", 3.0)
+		"reached":
+			for it in items:
+				if str((it["data"] as Dictionary)["kind"]) == "follow_finish" and not bool(it["done"]):
+					_mark_done(it)
+			_msg("follow_done", 3.5)
+			_check_finish()
+
 # ---------- lasso (chapter 10): choose Rakhsh from a running herd ----------
 
 func _build_lasso() -> void:
@@ -1077,6 +1133,8 @@ func _physics_process(delta: float) -> void:
 	_update_ice_lake(delta)
 	_update_sinking_stones(delta)
 	_update_lasso(delta)
+	_update_guard(delta)
+	_update_follow(delta)
 	if moving_stones.is_empty():
 		return
 	chain_time += delta
@@ -1172,7 +1230,7 @@ func _build_interactables() -> void:
 			"roll_finish":
 				node = PropFactory.make_clue_marker("clue")
 				pos += Vector3(0, 0.9, 0)
-			"turn_finish", "lamp_finish", "mosaic_finish", "mirror_finish", "watch_finish", "ice_finish", "stones_finish", "lasso_finish":
+			"turn_finish", "lamp_finish", "mosaic_finish", "mirror_finish", "watch_finish", "ice_finish", "stones_finish", "lasso_finish", "guard_finish", "follow_finish":
 				node = PropFactory.make_clue_marker("clue")
 				pos += Vector3(0, 0.9, 0)
 			"npc":
@@ -1698,6 +1756,10 @@ func _selftest_level(i: int) -> int:
 		failures += await _selftest_sinking_stones()
 	if level.has("lasso"):
 		failures += await _selftest_lasso()
+	if level.has("guard"):
+		failures += await _selftest_guard()
+	if level.has("follow"):
+		failures += await _selftest_follow()
 	for it in items:
 		if not bool((it["data"] as Dictionary).get("finale", false)):
 			it["done"] = true
@@ -2138,6 +2200,84 @@ func _selftest_mosaic() -> int:
 ## A stone must crumble once stepped on (and come back), and a jumping bot must cross with the real physics.
 ## Throwing at another horse must only release it (a mistake, never a catch); a bot that chases Rakhsh and
 ## throws with the real movement physics must catch him.
+## A bot that runs into every charging lion (real physics) must finish the labour; a lion that reaches Rostam
+## only startles him.
+func _selftest_guard() -> int:
+	var g := guard_ctl
+	if g == null or g.lions.is_empty():
+		print("  guard: controller missing")
+		return 1
+	# 1) a lion that is left alone reaches Rostam and only startles him
+	g.reset()
+	g.waked = true
+	var lion: Dictionary = g.lions[0]
+	lion["state"] = "dash"
+	(lion["node"] as Node3D).position = g.center + Vector3(0, 0, 6)
+	player.global_position = g.center + Vector3(40, 0.6, 0)
+	player.velocity = Vector3.ZERO
+	var startled_ok := false
+	for _f in range(240):
+		await get_tree().physics_frame
+		if g.startled > 0:
+			startled_ok = true
+			break
+	# 2) the bot
+	g.reset()
+	player.global_position = spawn_point
+	player.velocity = Vector3.ZERO
+	for _frame in range(5200):
+		if g.finished:
+			break
+		var target := g.center + Vector3(4.0, 0.0, 3.0)
+		var cl := g.charging_lion()
+		if not cl.is_empty():
+			target = (cl["node"] as Node3D).position
+		var d := Vector2(target.x - player.global_position.x, target.z - player.global_position.z)
+		GameState.move_vector = d.normalized() if d.length() > 1.0 else Vector2.ZERO
+		await get_tree().physics_frame
+	GameState.move_vector = Vector2.ZERO
+	var finish_done := false
+	for it in items:
+		if str((it["data"] as Dictionary)["kind"]) == "guard_finish":
+			finish_done = bool(it["done"])
+	print("  guard: difficulty=%d lions=%d need=%d driven=%d startled=%d done=%s finish=%s startle_test=%s" % [GameState.difficulty, g.lions.size(), g.need, g.driven, g.startled, g.finished, finish_done, startled_ok])
+	return 0 if (g.finished and finish_done and startled_ok) else 1
+
+## A bot that follows the ram (never a mirage) must reach the spring; a bot that runs into a mirage only loses it.
+func _selftest_follow() -> int:
+	var f := follow_ctl
+	if f == null or f.mirages.is_empty():
+		print("  follow: controller missing")
+		return 1
+	# 1) a mirage vanishes when entered and counts once
+	f.reset()
+	var m: Dictionary = f.mirages[0]
+	var mp: Vector3 = m["pos"]
+	player.global_position = Vector3(mp.x, mp.y + 0.6, mp.z)
+	player.velocity = Vector3.ZERO
+	for _i in range(8):
+		await get_tree().physics_frame
+	var mirage_ok: bool = bool(m["gone"]) and f.vanished == 1
+	# 2) the bot follows the ram
+	f.reset()
+	player.global_position = spawn_point
+	player.velocity = Vector3.ZERO
+	for _frame in range(6000):
+		if f.reached:
+			break
+		var target: Vector3 = f.ram.position if not f.reached and f.idx < f.points.size() - 1 else f.spring
+		var d := Vector2(target.x - player.global_position.x, target.z - player.global_position.z)
+		# stay a few steps behind the ram, then walk to the spring
+		GameState.move_vector = d.normalized() * (1.0 if d.length() > 5.0 else 0.0)
+		await get_tree().physics_frame
+	GameState.move_vector = Vector2.ZERO
+	var finish_done := false
+	for it in items:
+		if str((it["data"] as Dictionary)["kind"]) == "follow_finish":
+			finish_done = bool(it["done"])
+	print("  follow: difficulty=%d reached=%s finish=%s mirage_test=%s vanished_by_bot=%d" % [GameState.difficulty, f.reached, finish_done, mirage_ok, f.vanished])
+	return 0 if (f.reached and finish_done and mirage_ok and f.vanished == 0) else 1
+
 func _selftest_lasso() -> int:
 	var ls := lasso
 	if ls == null or ls.horses.size() < 3:
