@@ -1,0 +1,133 @@
+name: Release Android APK
+
+"on":
+  workflow_dispatch:
+    inputs:
+      version_name:
+        description: "Version name shown to players (empty = 0.1.<commit count>)"
+        required: false
+        default: ""
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  android:
+    name: Export signed release APK
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # the version code is the number of commits
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Install Android SDK packages
+        shell: bash
+        run: |
+          set -eu
+          SDK_ROOT="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          SDKMANAGER="$(find "$SDK_ROOT/cmdline-tools" -type f -name sdkmanager | head -n 1)"
+          test -x "$SDKMANAGER"
+          yes | "$SDKMANAGER" --sdk_root="$SDK_ROOT" --licenses || true
+          "$SDKMANAGER" --sdk_root="$SDK_ROOT" "platform-tools" "platforms;android-34" "build-tools;34.0.0" "cmdline-tools;latest" "cmake;3.10.2.4988404" "ndk;23.2.8568313"
+          echo "ANDROID_HOME=$SDK_ROOT" >> "$GITHUB_ENV"
+
+      - name: Set up Godot and export templates
+        uses: chickensoft-games/setup-godot@v2
+        with:
+          version: 4.4.1
+          use-dotnet: false
+          include-templates: true
+
+      - name: Prepare compressed voice and sound assets
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+          python3 tools/convert_voice.py
+
+      - name: Configure Godot Android SDK paths
+        shell: bash
+        run: |
+          mkdir -p "$HOME/.config/godot"
+          cat > "$HOME/.config/godot/editor_settings-4.4.tres" <<EOF
+          [gd_resource type="EditorSettings" format=3]
+
+          [resource]
+          export/android/android_sdk_path = "$ANDROID_HOME"
+          export/android/java_sdk_path = "$JAVA_HOME"
+          EOF
+
+      - name: Verify Android toolchain paths
+        shell: bash
+        run: |
+          cat "$HOME/.config/godot/editor_settings-4.4.tres"
+          test -x "$ANDROID_HOME/platform-tools/adb"
+          test -d "$ANDROID_HOME/platforms/android-34"
+          test -d "$ANDROID_HOME/build-tools/34.0.0"
+          test -d "$ANDROID_HOME/ndk/23.2.8568313"
+          test -d "$ANDROID_HOME/cmake/3.10.2.4988404"
+          test -x "$JAVA_HOME/bin/java"
+
+      - name: Prepare the permanent release key
+        shell: bash
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: |
+          set -eu
+          if [ -z "$KEYSTORE_B64" ] || [ -z "$KEYSTORE_PASS" ] || [ -z "$KEY_ALIAS" ]; then
+            echo "::error::The release key is missing: set ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD and ANDROID_KEY_ALIAS in the repository secrets (see documentation/android-signing.md)."
+            exit 1
+          fi
+          KS="$GITHUB_WORKSPACE/app/signing.keystore"
+          echo "$KEYSTORE_B64" | base64 -d > "$KS"
+          echo "GODOT_ANDROID_KEYSTORE_RELEASE_PATH=$KS" >> "$GITHUB_ENV"
+          echo "GODOT_ANDROID_KEYSTORE_RELEASE_USER=$KEY_ALIAS" >> "$GITHUB_ENV"
+          echo "GODOT_ANDROID_KEYSTORE_RELEASE_PASSWORD=$KEYSTORE_PASS" >> "$GITHUB_ENV"
+
+      - name: Set Android version
+        shell: bash
+        env:
+          INPUT_NAME: ${{ github.event.inputs.version_name }}
+        run: |
+          NAME="${INPUT_NAME:-}"
+          if [ -z "$NAME" ] && [ "${GITHUB_REF_TYPE}" = "tag" ]; then NAME="${GITHUB_REF_NAME}"; fi
+          python3 tools/set_android_version.py ${NAME:+--name "$NAME"}
+
+      - name: Import project
+        run: godot --headless --editor --path app --quit
+
+      - name: Export release APK
+        run: |
+          mkdir -p app/build
+          godot --headless --verbose --path app --export-release "Android" build/IranHeritageWorld.apk
+          test -s app/build/IranHeritageWorld.apk
+
+      - name: Verify the APK is signed with the permanent key
+        run: python3 tools/verify_apk_signature.py app/build/IranHeritageWorld.apk --expect "A7:83:64:3F:81:F5:6A:47:B3:06:5B:9D:17:E8:39:18:94:C5:C2:53:B1:CE:F3:97:52:85:8D:2E:FA:34:3C:AF"
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: IranHeritageWorld-release-apk
+          path: app/build/IranHeritageWorld.apk
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Attach the APK to the GitHub release (tags only)
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" app/build/IranHeritageWorld.apk --title "$GITHUB_REF_NAME" --notes "Signed release build. Install over the previous version; the signature is the project's permanent key."

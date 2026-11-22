@@ -14,11 +14,13 @@ permissions:
 
 jobs:
   android:
-    name: Export Android debug APK
+    name: Export Android debug APK (stable signature)
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # the version code is the number of commits
 
       - name: Set up Java
         uses: actions/setup-java@v4
@@ -74,22 +76,32 @@ jobs:
           test -d "$ANDROID_HOME/cmake/3.10.2.4988404"
           test -x "$JAVA_HOME/bin/java"
 
-      - name: Create temporary Android debug signing key
+      - name: Prepare Android signing key
         shell: bash
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
         run: |
-          mkdir -p "$GITHUB_WORKSPACE/app"
-          keytool -genkeypair -v -keystore "$GITHUB_WORKSPACE/app/debug.keystore" -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
-          echo "GODOT_ANDROID_KEYSTORE_DEBUG_PATH=$GITHUB_WORKSPACE/app/debug.keystore" >> "$GITHUB_ENV"
-          echo "GODOT_ANDROID_KEYSTORE_DEBUG_USER=androiddebugkey" >> "$GITHUB_ENV"
-          echo "GODOT_ANDROID_KEYSTORE_DEBUG_PASSWORD=android" >> "$GITHUB_ENV"
-          python3 - <<'PY'
-          from pathlib import Path
-          preset = Path("app/export_presets.cfg")
-          data = preset.read_text()
-          data = data.replace('keystore/debug="res://debug.keystore"', f'keystore/debug="{Path("app/debug.keystore").resolve()}"')
-          preset.write_text(data)
-          print("Configured absolute debug keystore path in Android export preset.")
-          PY
+          set -eu
+          KS="$GITHUB_WORKSPACE/app/signing.keystore"
+          if [ -n "$KEYSTORE_B64" ]; then
+            echo "$KEYSTORE_B64" | base64 -d > "$KS"
+            ALIAS="$KEY_ALIAS"
+            PASS="$KEYSTORE_PASS"
+            echo "Using the permanent project signing key (stable signature)."
+          else
+            keytool -genkeypair -keystore "$KS" -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
+            ALIAS=androiddebugkey
+            PASS=android
+            echo "::warning::No signing secrets available: using a temporary key. Every such build has a different signature."
+          fi
+          echo "GODOT_ANDROID_KEYSTORE_DEBUG_PATH=$KS" >> "$GITHUB_ENV"
+          echo "GODOT_ANDROID_KEYSTORE_DEBUG_USER=$ALIAS" >> "$GITHUB_ENV"
+          echo "GODOT_ANDROID_KEYSTORE_DEBUG_PASSWORD=$PASS" >> "$GITHUB_ENV"
+
+      - name: Set Android version from git history
+        run: python3 tools/set_android_version.py
 
       - name: Import project
         run: godot --headless --editor --path app --quit
@@ -100,6 +112,14 @@ jobs:
           mkdir -p app/build
           godot --headless --verbose --path app --export-debug "Android" build/IranHeritageWorld-debug.apk
           test -s app/build/IranHeritageWorld-debug.apk
+
+      - name: Verify the APK signature
+        env:
+          HAVE_KEY: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' }}
+        run: |
+          EXPECT=""
+          if [ "$HAVE_KEY" = "true" ]; then EXPECT="A7:83:64:3F:81:F5:6A:47:B3:06:5B:9D:17:E8:39:18:94:C5:C2:53:B1:CE:F3:97:52:85:8D:2E:FA:34:3C:AF"; fi
+          python3 tools/verify_apk_signature.py app/build/IranHeritageWorld-debug.apk ${EXPECT:+--expect "$EXPECT"}
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
