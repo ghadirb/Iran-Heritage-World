@@ -858,7 +858,7 @@ func _update_guard(delta: float) -> void:
 func _build_follow() -> void:
 	follow_ctl = FollowController.new()
 	follow_ctl.build(level_root, terrain, level)
-	_msg("follow_start", 6.0)
+	_msg(str(level.get("follow_msg_prefix", "follow")) + "_start", 6.0)
 
 func _update_follow(delta: float) -> void:
 	if follow_ctl == null:
@@ -866,12 +866,12 @@ func _update_follow(delta: float) -> void:
 	match follow_ctl.step(delta, player.global_position):
 		"mirage":
 			mistakes += 1
-			_msg("follow_mirage", 3.0)
+			_msg(str(level.get("follow_msg_prefix", "follow")) + "_mirage", 3.0)
 		"reached":
 			for it in items:
 				if str((it["data"] as Dictionary)["kind"]) == "follow_finish" and not bool(it["done"]):
 					_mark_done(it)
-			_msg("follow_done", 3.5)
+			_msg(str(level.get("follow_msg_prefix", "follow")) + "_done", 3.5)
 			_check_finish()
 
 # ---------- lasso (chapter 10): choose Rakhsh from a running herd ----------
@@ -968,19 +968,19 @@ func _update_night_watch(delta: float) -> void:
 		checkpoint = night_watch.zone_center(night_watch.last_zone) + Vector3(0, 1.2, 0)
 	match result:
 		"watch":
-			_msg("watch_start", 5.0)
+			_msg(str(level.get("watch_msg_prefix", "watch")) + "_start", 5.0)
 		"seen":
 			mistakes += 1
 			if night_watch.last_zone < 0:
 				checkpoint = spawn_point
 			_respawn(false)
 			night_watch.after_seen()
-			_msg("watch_seen", 4.0)
+			_msg(str(level.get("watch_msg_prefix", "watch")) + "_seen", 4.0)
 		"arrived":
 			for it in items:
 				if str((it["data"] as Dictionary)["kind"]) == "watch_finish" and not bool(it["done"]):
 					_mark_done(it)
-			_msg("watch_safe", 3.5)
+			_msg(str(level.get("watch_msg_prefix", "watch")) + "_safe", 3.5)
 			_check_finish()
 
 func _aim_ray() -> Dictionary:

@@ -448,6 +448,15 @@ static func make_horse(coat: Color, spots: bool = false) -> Node3D:
 			root.add_child(dot)
 	return root
 
+## A standing man in a coat (+Z forward): Olad, the captive guide of the fifth labour.
+static func make_guide_man(coat: Color) -> Node3D:
+	var root := Node3D.new()
+	root.add_child(part(cylinder(0.3, 0.38, 1.0, 10), mat(coat, 0.9), Vector3(0, 1.0, 0)))
+	root.add_child(part(cylinder(0.12, 0.14, 0.5, 8), mat(coat.darkened(0.4), 0.9), Vector3(0, 0.3, 0)))
+	root.add_child(part(sphere(0.2, 10), mat(Color("#d9b08a"), 0.8), Vector3(0, 1.72, 0)))
+	root.add_child(part(cylinder(0.1, 0.24, 0.2, 10), mat(Color("#3a2a20"), 0.9), Vector3(0, 1.95, 0)))
+	return root
+
 ## A low-poly lion (+Z forward): tawny body, darker mane.
 static func make_lion() -> Node3D:
 	var root := Node3D.new()

@@ -60,7 +60,10 @@
 - [x] فصل ۹ «داریوش و کتیبه‌ی بیستون» (مراحل ۳۳ تا ۳۵) — منبع‌ها در documentation/chapters/darius_behistun.md
 - [x] فصل ۱۰ «رستم و رخش» (مراحل ۳۶ و ۳۷) با مکانیک تازه‌ی کمند — منبع‌ها در documentation/chapters/rostam_rakhsh.md
 - [x] فصل ۱۱ «هفت‌خانِ رستم (۲)» (مراحل ۳۸ تا ۴۰) با دو مکانیک تازه: نگهبانی و دنبال کردن — منبع‌ها در documentation/chapters/haft_khan_first.md
-- [ ] کلیپ برای فصل‌های ۴ تا ۱۱ (پیشنهادها در documentation/cutscenes.md)
+- [x] فصل ۱۲ «هفت‌خانِ رستم (۳)» (مراحل ۴۱ تا ۴۳) — هفت خان کامل شد (فصل‌های ۸، ۱۱ و ۱۲)
+- [x] امضای ثابت اندروید (کلید دائمی در GitHub Secrets، گردش‌کار Release، کد نسخه از تاریخچه‌ی git) — documentation/android-signing.md
+- [ ] تصمیم درباره‌ی نام بسته‌ی نهایی (package/unique_name) پیش از اولین انتشار در مایکت
+- [ ] کلیپ برای فصل‌های ۴ تا ۱۲ (پیشنهادها در documentation/cutscenes.md)
 - [x] فصل ۶ «کوروش و هخامنشیان» (مراحل ۲۳ تا ۲۵: استوانه‌ی کوروش، پاسارگاد، آزمون) — منبع‌ها در documentation/chapters/cyrus_achaemenids.md
 - [x] فصل ۷ «راه شاهی و تخت‌جمشید» (مراحل ۲۶ تا ۲۸) — منبع‌ها در documentation/chapters/royal_road_persepolis.md
 - [x] فصل ۸ «سفر رستم» (مراحل ۲۹ تا ۳۲: اژدها، افسونگر، دارو برای کیکاووس، آزمون) — سه خان از هفت‌خان؛ خان‌های ۱، ۲، ۵ و ۶ برای گسترش بعدی

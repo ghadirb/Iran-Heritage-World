@@ -34,7 +34,7 @@ func build(parent: Node3D, terrain_builder: TerrainBuilder, level: Dictionary) -
 		var x := terrain.path_x(z) + sin(float(i) * 1.7) * float(data["sway"])
 		points.append(Vector3(x, terrain.height(x, z), z))
 	spring = points[points.size() - 1]
-	ram = PropFactory.make_ram()
+	ram = PropFactory.make_guide_man(Color("#5a4636")) if str(data.get("guide", "ram")) == "olad" else PropFactory.make_ram()
 	ram.position = points[0]
 	root.add_child(ram)
 	_build_spring(spring)
@@ -44,7 +44,7 @@ func build(parent: Node3D, terrain_builder: TerrainBuilder, level: Dictionary) -
 		var side := 1.0 if k % 2 == 0 else -1.0
 		var p := points[seg] + Vector3(side * float(offsets[k]), 0, 0)
 		p.y = terrain.height(p.x, p.z)
-		var disc := PropFactory.part(PropFactory.cylinder(2.6, 2.6, 0.05, 20), PropFactory.mat(Color("#5fb4ec"), 0.1, 0.2, 0.8), Vector3.ZERO)
+		var disc := PropFactory.part(PropFactory.cylinder(2.6, 2.6, 0.05, 20), PropFactory.mat(Color(str(data.get("decoy_color", "#5fb4ec"))), 0.1, 0.2, 0.8), Vector3.ZERO)
 		disc.position = p + Vector3(0, 0.06, 0)
 		disc.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		root.add_child(disc)
