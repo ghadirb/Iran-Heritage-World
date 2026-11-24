@@ -40,7 +40,12 @@ def main() -> None:
         print(out.stderr)
         gh_error("apksigner verify failed: " + (out.stderr or out.stdout)[:600])
         raise SystemExit("APK signature does not verify")
-    m = re.search(r"Signer #1 certificate SHA-256 digest: ([0-9a-fA-F]+)", out.stdout)
+    # apksigner prints "Signer #1 certificate SHA-256 digest: ..." (v1/v2) or "V3.0 Signer: certificate SHA-256 digest: ..."
+    digests = set(re.findall(r"certificate SHA-256 digest: ([0-9a-fA-F]+)", out.stdout))
+    m = re.search(r"certificate SHA-256 digest: ([0-9a-fA-F]+)", out.stdout)
+    if len(digests) > 1:
+        gh_error("the APK carries more than one signing certificate: " + ", ".join(sorted(digests)))
+        raise SystemExit("more than one signing certificate")
     if not m:
         gh_error("no fingerprint in apksigner output: " + out.stdout[:600])
         raise SystemExit("could not read the certificate fingerprint")
