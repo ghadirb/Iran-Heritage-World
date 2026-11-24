@@ -1,0 +1,131 @@
+name: Build Android APK
+
+"on":
+  workflow_dispatch:
+  push:
+    branches:
+      - "codex/**"
+    paths:
+      - "app/**"
+      - "tools/**"
+      - ".github/workflows/build-android.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  android:
+    name: Export Android debug APK (stable signature)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # the version code is the number of commits
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Install Android SDK packages
+        shell: bash
+        run: |
+          set -eu
+          SDK_ROOT="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          SDKMANAGER="$(find "$SDK_ROOT/cmdline-tools" -type f -name sdkmanager | head -n 1)"
+          test -x "$SDKMANAGER"
+          yes | "$SDKMANAGER" --sdk_root="$SDK_ROOT" --licenses || true
+          "$SDKMANAGER" --sdk_root="$SDK_ROOT" "platform-tools" "platforms;android-34" "build-tools;34.0.0" "cmdline-tools;latest" "cmake;3.10.2.4988404" "ndk;23.2.8568313"
+          echo "ANDROID_HOME=$SDK_ROOT" >> "$GITHUB_ENV"
+
+      - name: Set up Godot and export templates
+        uses: chickensoft-games/setup-godot@v2
+        with:
+          version: 4.4.1
+          use-dotnet: false
+          include-templates: true
+
+      - name: Prepare compressed voice and sound assets
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+          python3 tools/convert_voice.py
+
+      - name: Configure Godot Android SDK paths
+        shell: bash
+        run: |
+          mkdir -p "$HOME/.config/godot"
+          cat > "$HOME/.config/godot/editor_settings-4.4.tres" <<EOF
+          [gd_resource type="EditorSettings" format=3]
+
+          [resource]
+          export/android/android_sdk_path = "$ANDROID_HOME"
+          export/android/java_sdk_path = "$JAVA_HOME"
+          EOF
+
+      - name: Verify Android toolchain paths
+        shell: bash
+        run: |
+          cat "$HOME/.config/godot/editor_settings-4.4.tres"
+          test -x "$ANDROID_HOME/platform-tools/adb"
+          test -d "$ANDROID_HOME/platforms/android-34"
+          test -d "$ANDROID_HOME/build-tools/34.0.0"
+          test -d "$ANDROID_HOME/ndk/23.2.8568313"
+          test -d "$ANDROID_HOME/cmake/3.10.2.4988404"
+          test -x "$JAVA_HOME/bin/java"
+
+      - name: Prepare Android signing key
+        shell: bash
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: |
+          set -eu
+          KS="$GITHUB_WORKSPACE/app/signing.keystore"
+          if [ -n "$KEYSTORE_B64" ]; then
+            echo "$KEYSTORE_B64" | base64 -d > "$KS"
+            ALIAS="$KEY_ALIAS"
+            PASS="$KEYSTORE_PASS"
+            echo "Using the permanent project signing key (stable signature)."
+          else
+            keytool -genkeypair -keystore "$KS" -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
+            ALIAS=androiddebugkey
+            PASS=android
+            echo "::warning::No signing secrets available: using a temporary key. Every such build has a different signature."
+          fi
+          echo "GODOT_ANDROID_KEYSTORE_DEBUG_PATH=$KS" >> "$GITHUB_ENV"
+          echo "GODOT_ANDROID_KEYSTORE_DEBUG_USER=$ALIAS" >> "$GITHUB_ENV"
+          echo "GODOT_ANDROID_KEYSTORE_DEBUG_PASSWORD=$PASS" >> "$GITHUB_ENV"
+
+      - name: Set Android version from git history
+        run: python3 tools/set_android_version.py
+
+      - name: Import project
+        run: godot --headless --editor --path app --quit
+
+      - name: Export debug APK
+        run: |
+          # With --path app, Godot writes the preset-relative export path inside app/.
+          mkdir -p app/build
+          godot --headless --verbose --path app --export-debug "Android" build/IranHeritageWorld-debug.apk
+          test -s app/build/IranHeritageWorld-debug.apk
+
+      - name: Verify the APK signature
+        env:
+          HAVE_KEY: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' }}
+        run: |
+          EXPECT=""
+          if [ "$HAVE_KEY" = "true" ]; then EXPECT="A7:83:64:3F:81:F5:6A:47:B3:06:5B:9D:17:E8:39:18:94:C5:C2:53:B1:CE:F3:97:52:85:8D:2E:FA:34:3C:AF"; fi
+          python3 tools/verify_apk_signature.py app/build/IranHeritageWorld-debug.apk ${EXPECT:+--expect "$EXPECT"}
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: IranHeritageWorld-debug-apk
+          path: app/build/IranHeritageWorld-debug.apk
+          if-no-files-found: error
+          retention-days: 14
